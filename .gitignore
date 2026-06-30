@@ -1,0 +1,14 @@
+# Generated data and outputs
+analysis/
+data/
+plots/
+
+# Julia
+# Manifest.toml
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+/docs/build/
+
+# OS
+.DS_Store
