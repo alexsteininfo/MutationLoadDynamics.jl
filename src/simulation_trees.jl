@@ -34,8 +34,10 @@ Return the time at which the cell divided (birthtime of its left child), or `not
 if the cell is still alive (a leaf).
 """
 function endtime(cellnode::BinaryNode)
-    if haschildren(cellnode)
+    if !isnothing(cellnode.left)
         return cellnode.left.data.birthtime
+    elseif !isnothing(cellnode.right)
+        return cellnode.right.data.birthtime
     else
         return nothing
     end
@@ -48,8 +50,9 @@ Compute the lifetime of a cell. If it has not yet divided, use `tmax` as the end
 (defaults to the age of the tree).
 """
 function celllifetime(cellnode::BinaryNode, tmax=nothing)
-    if haschildren(cellnode)
-        return cellnode.left.data.birthtime - cellnode.data.birthtime
+    et = endtime(cellnode)
+    if !isnothing(et)
+        return et - cellnode.data.birthtime
     else
         tmax = isnothing(tmax) ? age(getroot(cellnode)) : tmax
         return tmax - cellnode.data.birthtime
@@ -66,8 +69,9 @@ function celllifetimes(root; excludeliving=true)
     lifetimes = Float64[]
     if excludeliving
         for cellnode in PreOrderDFS(root)
-            if haschildren(cellnode)
-                push!(lifetimes, cellnode.left.data.birthtime - cellnode.data.birthtime)
+            et = endtime(cellnode)
+            if !isnothing(et)
+                push!(lifetimes, et - cellnode.data.birthtime)
             end
         end
     else

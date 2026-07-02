@@ -2,6 +2,7 @@
 analysis/
 data/
 plots/
+theory/
 
 # Julia
 # Manifest.toml
