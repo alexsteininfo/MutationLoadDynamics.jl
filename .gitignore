@@ -1,9 +1,3 @@
-# Generated data and outputs
-analysis/
-data/
-plots/
-theory/
-
 # Julia
 # Manifest.toml
 *.jl.cov
