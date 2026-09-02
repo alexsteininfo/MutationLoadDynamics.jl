@@ -194,6 +194,30 @@ end
 
 id(cellnode::BinaryNode{<:AbstractTreeCell}) = cellnode.data.id
 
+# ── CellEvent ──────────────────────────────────────────────────────────────────
+
+"""
+    CellEvent
+
+An entry in the global min-heap event queue.
+
+Defined here rather than in `events.jl` because `Population` carries a
+`BinaryMinHeap{CellEvent}` of pending events and therefore needs the type to
+already exist. The scheduling logic itself lives in `events.jl`.
+
+# Fields
+- `time::Float64` — absolute simulation time at which the event fires
+- `node::BinaryNode{NonMarkovCell}` — the cell whose event this is
+- `event_type::Symbol` — `:birth` (cell divides) or `:death` (cell dies)
+"""
+struct CellEvent
+    time::Float64
+    node::BinaryNode{NonMarkovCell}
+    event_type::Symbol
+end
+
+Base.isless(a::CellEvent, b::CellEvent) = a.time < b.time
+
 # ── Population ─────────────────────────────────────────────────────────────────
 
 """
@@ -201,12 +225,30 @@ id(cellnode::BinaryNode{<:AbstractTreeCell}) = cellnode.data.id
 
 Holds the set of currently alive cells in a `Dict` keyed by cell id, enabling O(1)
 insertion and removal. The simulation time `t` is updated after each event.
+
+# Fields
+- `cells` — alive cells, keyed by cell id.
+- `t::Float64` — current simulation time.
+- `_next_id::Int64` — id allocated to the most recently created cell.
+- `_pending` — the queue of already-drawn, not-yet-fired events, one per alive cell,
+  or `nothing` if no events have been scheduled yet. `simulate!` carries this across
+  calls so that chained blocks resume from the event times already drawn instead of
+  redrawing them from stale birthtimes. Use [`reset_schedule!`](@ref) to discard it.
 """
 mutable struct Population
     cells::Dict{Int64, BinaryNode{NonMarkovCell}}
     t::Float64
     _next_id::Int64
+    _pending::Union{Nothing, BinaryMinHeap{CellEvent}}
 end
+
+"""
+    Population(cells, t, _next_id)
+
+Construct a `Population` with no carried event queue. Preserves the three-argument
+positional form used before `_pending` was added.
+"""
+Population(cells, t, _next_id) = Population(cells, t, _next_id, nothing)
 
 """
     allcells(population) -> Vector{BinaryNode{NonMarkovCell}}

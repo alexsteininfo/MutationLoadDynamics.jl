@@ -191,11 +191,11 @@ function _fire_end_triggers!(acc::MeasurementAccumulator, pop::Population)
     end
 end
 
-function _reset_accumulator!(acc::MeasurementAccumulator)
+function _reset_accumulator!(acc::MeasurementAccumulator, t0::Float64 = 0.0)
     empty!(acc.trajectory_points)
     empty!(acc.snapshots)
     empty!(acc.fired_triggers)
-    acc.next_trajectory_t = 0.0
+    acc.next_trajectory_t = t0
 end
 
 # ── Public API ────────────────────────────────────────────────────────────────

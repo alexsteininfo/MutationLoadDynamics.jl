@@ -11,6 +11,8 @@ tests = [
     "initialisation",
     "events",
     "simulations",
+    "regression",
+    "chaining",
     "statistics",
 ]
 

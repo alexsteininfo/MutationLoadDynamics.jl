@@ -1,20 +1,5 @@
-"""
-    CellEvent
-
-An entry in the global min-heap event queue.
-
-# Fields
-- `time::Float64` — absolute simulation time at which the event fires
-- `node::BinaryNode{NonMarkovCell}` — the cell whose event this is
-- `event_type::Symbol` — `:birth` (cell divides) or `:death` (cell dies)
-"""
-struct CellEvent
-    time::Float64
-    node::BinaryNode{NonMarkovCell}
-    event_type::Symbol
-end
-
-Base.isless(a::CellEvent, b::CellEvent) = a.time < b.time
+# `CellEvent` and its `Base.isless` method are defined in `types.jl`, because
+# `Population` needs the type in order to hold a queue of pending events.
 
 """
     schedule_cell!(heap, node, block, rng)

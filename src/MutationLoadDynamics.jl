@@ -21,6 +21,7 @@ Population,
 # Simulation entry point
 simulate!,
 initialize_population,
+reset_schedule!,
 
 # Tree utilities
 allcells,

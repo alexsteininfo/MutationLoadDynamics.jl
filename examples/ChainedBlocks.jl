@@ -8,6 +8,14 @@
 ## This demonstrates chaining two successive simulate! calls on the same Population
 ## so the lineage tree spans both phases.
 ##
+## Chaining carries the queue of already-drawn, not-yet-fired events across the call
+## boundary rather than redrawing it. Cells alive at the boundary have already survived
+## part of their cell cycle without an event, so redrawing them from their birthtimes
+## would both drop that age-conditioning and place some events before the current
+## population time. Carrying the queue means each cell simply keeps the division or death
+## time it had already committed to -- and a chained run matches the equivalent
+## uninterrupted one draw for draw.
+##
 
 using Pkg
 Pkg.activate(dirname(@__DIR__))

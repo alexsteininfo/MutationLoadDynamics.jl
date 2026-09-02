@@ -90,6 +90,8 @@ NonMarkovBlock(;
     fitness_update = (f, δ) -> f + δ,            # (f::Float64, δ::Float64) -> Float64
     ν              = 0.5,                         # Poisson mean drivers per daughter per division
     restart_on_extinction = false,                # restart from initial state on extinction
+    on_division    = nothing,                     # (pop, parent, d1, d2) -> Nothing
+    on_restart     = nothing,                     # (pop) -> Nothing
 )
 ```
 
@@ -102,6 +104,50 @@ NonMarkovBlock(;
 | `fitness_update` | `(f, δ) -> f` | How a single driver mutation changes fitness; applied once per mutation event |
 | `ν` | `Float64` | Mean number of driver mutations per daughter cell per division (Poisson) |
 | `restart_on_extinction` | `Bool` | If `true`, restart from the initial population on extinction (default `false`) |
+| `on_division` | `(pop, parent, d1, d2) -> Nothing` | Optional hook fired at every division, or `nothing` (default). See [Division hook](#division-hook) |
+| `on_restart` | `(pop) -> Nothing` | Optional hook fired after an extinction restart, or `nothing` (default) |
+
+#### Division hook
+
+`on_division` applies a deterministic, state-triggered fitness change to one cell at one
+moment — something the stochastic Poisson-`ν` driver channel cannot express. It runs once
+per birth event, after both daughters exist and **before** either is scheduled, so a
+fitness change takes effect on the boosted daughter's own first division rather than only
+on its descendants.
+
+`NonMarkovCell` is immutable and `BinaryNode` is mutable, so the supported way to change a
+daughter is to replace its `data`. Changing `id` is not supported — ids key
+`population.cells`. Inside the hook `popsize(pop)` is the pre-division size **+ 1**, so to
+inject at `N_critic` cells you test `popsize(pop) == N_critic + 1`.
+
+```julia
+injected = Ref(false)
+block = NonMarkovBlock(
+    birth_dist  = f -> Gamma(5.0, 1.0 / (5.0 * f)),
+    death_dist  = f -> Gamma(5.0, 1.0 / (5.0 * 0.5)),
+    stopfunction = pop -> popsize(pop) >= 10_000,
+    driver_dist = Dirac(0.0),
+    fitness_update = (f, δ) -> f,
+    ν = 2.0,
+    on_division = function (pop, parent, d1, d2)
+        injected[] && return nothing
+        popsize(pop) == N_critic + 1 || return nothing
+        injected[] = true
+        c = d1.data
+        d1.data = NonMarkovCell(c.id, c.birthtime, c.mutations, 1.0 + s)
+        return nothing
+    end,
+)
+```
+
+Keep hook state in the closure — the package holds no global mutable state, so one
+population, block and closure per simulation is safe under `Threads.@threads`. A hook that
+does not draw from `rng` leaves the random stream untouched.
+
+Because a restart cannot reset state owned by your closure, a hook holding an `injected`
+flag would otherwise spend its one injection on an attempt that later goes extinct. Use
+`on_restart` to reset it, or set `restart_on_extinction = false` and drive your own retry
+loop with a fresh closure per attempt.
 
 ### `simulate!`
 
@@ -111,6 +157,36 @@ simulate!(pop, block, rng; accumulator = acc)   # with trajectory/snapshot recor
 ```
 
 Runs the simulation in-place and returns `pop`. The RNG defaults to `Random.GLOBAL_RNG`.
+
+#### Chaining blocks
+
+Calling `simulate!` again on the same population continues the same lineage tree. The
+queue of already-drawn, not-yet-fired events is carried on the population and **reused**
+rather than redrawn — see `examples/ChainedBlocks.jl`.
+
+This matters for any non-exponential waiting time. Redrawing would anchor each cell's next
+event at its `birthtime` while ignoring the age it has already accumulated without an
+event: the correct law is the conditional `T | T > age`, and drawing unconditionally both
+drops that conditioning and places some events before the current `pop.t`, running the
+clock backwards. Reusing the pending events avoids this exactly, and makes a chained run
+identical to the equivalent uninterrupted one, draw for draw.
+
+The trade-off to know about: a carried event was drawn under the *previous* block's
+`birth_dist`/`death_dist`, so a second block that changes those only affects cells
+scheduled after the boundary. `reset_schedule!(pop)` discards the queue if you want every
+cell redrawn — but that reintroduces the age-conditioning error, so it is only sound when
+every alive cell has just been born. Chaining is not supported together with
+`restart_on_extinction`.
+
+### `reset_schedule!`
+
+```julia
+reset_schedule!(pop)
+```
+
+Discards the pending-event queue carried on `pop`, so the next `simulate!` redraws every
+alive cell's next event. Also the recovery path after editing `pop.cells` by hand, which
+otherwise leaves the queue inconsistent with the population and raises an error.
 
 ### `initialize_population`
 
