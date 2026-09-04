@@ -172,20 +172,29 @@ struct SamplingSpec
     sizes::Vector{Int}
     replicates::Int
     retain_full::Bool
+
+    # Inner constructor: this is the ONLY way to build a `SamplingSpec`, so there is
+    # no unvalidated path in — Julia would otherwise still expose the auto-generated
+    # default positional constructor, which skips every check below.
+    function SamplingSpec(sizes::AbstractVector{<:Integer},
+                          replicates::Integer,
+                          retain_full::Bool)
+        sizes = Int[Int(n) for n in sizes]
+        allunique(sizes) || throw(ArgumentError(
+            "SamplingSpec: duplicate sample sizes in $sizes — use `replicates` for " *
+            "repeated draws at the same size"))
+        all(>=(1), sizes) || throw(ArgumentError(
+            "SamplingSpec: every sample size must be >= 1, got $sizes"))
+        replicates >= 1 || throw(ArgumentError(
+            "SamplingSpec: replicates must be >= 1, got $replicates"))
+        return new(sizes, Int(replicates), retain_full)
+    end
 end
 
 function SamplingSpec(; sizes::AbstractVector{<:Integer} = Int[],
                         replicates::Integer = 1,
                         retain_full::Bool = true)
-    sizes = Int[Int(n) for n in sizes]
-    allunique(sizes) || throw(ArgumentError(
-        "SamplingSpec: duplicate sample sizes in $sizes — use `replicates` for " *
-        "repeated draws at the same size"))
-    all(>=(1), sizes) || throw(ArgumentError(
-        "SamplingSpec: every sample size must be >= 1, got $sizes"))
-    replicates >= 1 || throw(ArgumentError(
-        "SamplingSpec: replicates must be >= 1, got $replicates"))
-    return SamplingSpec(sizes, Int(replicates), retain_full)
+    return SamplingSpec(sizes, replicates, retain_full)
 end
 
 SamplingSpec(n::Integer) = SamplingSpec(sizes = [n])
@@ -242,8 +251,11 @@ end
 
 function sample_trees(population::Population, spec::SamplingSpec; seed::UInt64)
     root = getsingleroot(allcells(population))
-    isnothing(root) && throw(ArgumentError(
-        "population has no single common ancestor (it is a forest) — sampling " *
-        "needs one root; sample each root's tree separately"))
+    if isnothing(root)
+        nroots = length(AbstractTrees.getroot(allcells(population)))
+        throw(ArgumentError(
+            "population has $nroots independent roots (it is a forest), but " *
+            "sampling needs one — sample each root's tree separately"))
+    end
     return sample_trees(root, spec; seed = seed)
 end

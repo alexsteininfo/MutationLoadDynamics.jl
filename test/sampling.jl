@@ -289,6 +289,14 @@ end
     @test_throws ArgumentError SamplingSpec(sizes = [10], replicates = 0)
 end
 
+@testset "SamplingSpec cannot be constructed unvalidated" begin
+    # The auto-generated positional constructor used to bypass every check,
+    # which let two draws at the same (n, replicate) share a derived seed.
+    @test_throws ArgumentError SamplingSpec([10, 10], 1, true)
+    @test_throws ArgumentError SamplingSpec([0], 1, true)
+    @test_throws ArgumentError SamplingSpec([10], 0, true)
+end
+
 @testset "sample_trees: full data only" begin
     root = sampling_fixture()
     out  = sample_trees(root, SamplingSpec(); seed = UInt64(1))
@@ -408,4 +416,6 @@ end
     @test_throws ArgumentError sample_trees(pop, SamplingSpec(1); seed = UInt64(1))
     err = try sample_leaves(pop, 1; seed = UInt64(1)) catch e; e end
     @test occursin("2 independent roots", err.msg)
+    err_trees = try sample_trees(pop, SamplingSpec(1); seed = UInt64(1)) catch e; e end
+    @test occursin("2 independent roots", err_trees.msg)
 end
