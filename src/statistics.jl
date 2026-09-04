@@ -284,7 +284,14 @@ end
 _n_alive_leaves(root::BinaryNode) = length(getalivecells(root))
 
 function _check_spectrum_length(root::BinaryNode, N::Int, what::String)
-    n = _n_alive_leaves(root)
+    # Deliberately `length(collect(Leaves(root)))`, not `_n_alive_leaves(root)`:
+    # `_sfs_fill!`/`_branch_spectrum_fill!` below recurse over *every* leaf with no
+    # `isalive` filter, so the guard must count what those functions actually
+    # traverse. The two counts agree today (`isalive(::NonMarkovCell)` is always
+    # `true`), but a future cell type with dead leaves still present in the tree
+    # would pass a `getalivecells`-based guard here and then still overflow the
+    # fill functions, which is the exact `BoundsError` this guard exists to replace.
+    n = length(collect(Leaves(root)))
     n <= N || throw(ArgumentError(
         "$what: tree has $n alive leaves but N = $N — the spectrum would " *
         "overflow. Pass N >= $n."))

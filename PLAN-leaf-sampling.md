@@ -1,7 +1,7 @@
 # PLAN — leaf sampling of lineage trees
 
-**Status:** specification / handoff. Written 2026-09-04 from the consumer side
-(`gITH-nonMarkovian`). Not yet planned in detail, not implemented, not tested.
+**Status:** implemented and tested, on branch `feat/leaf-sampling`, released as
+v0.3.0. Written 2026-09-04 from the consumer side (`gITH-nonMarkovian`).
 
 **How to use this file:** open a Claude Code session in this repo
 (`/Users/alexanderstein/Documents/GitHub/MutationLoadDynamics.jl`), tell it to read
@@ -427,25 +427,37 @@ an answer. See the note in §8 on a local registry.
 1. **`replicates` in `LeafSample` — in or out?** Recommendation: **in** (§3.4). Costs
    one field now, genuinely awkward later, and the consumer's inability to persist it
    today is a property of its own frozen record type, not of this package.
+   **Resolved: in.** `LeafSample.replicate::Int` shipped as specified, defaulting to
+   1 in `sample_leaves` and derived per-draw by `sample_trees`/`SamplingSpec`.
 2. **Add `leaf_depths` to `src/statistics.jl`?** Recommendation: **yes** (§3.5) — the
    depth-invariance test cannot be written here without it.
+   **Resolved: yes.** `leaf_depths(root::BinaryNode)` shipped in `src/statistics.jl`
+   and is exported.
 3. **`sample_trees` vs `subsample_trees` vs `sample_population` for the layer-2
    name.** No strong view; pick one and be consistent. Avoid `subsample_tree` for the
    layer-1 function even though that is the consumer's current name, since layer 1
    returns a `LeafSample` rather than the old three-tuple — a different name makes the
    consumer-side migration a compile error rather than a silent shape change.
+   **Resolved: `sample_trees`.** Layer 1 shipped as `sample_leaves` (distinct from the
+   consumer's old `subsample_tree` name, as required); layer 2 as `sample_trees`.
 4. **`simulate_and_sample!` convenience wrapper?** Recommendation: **no** for now
    (§3.3).
+   **Resolved: no.** Not implemented; `simulate!` and `sample_trees` are called
+   separately, as recommended.
 5. **Sampling schemes other than uniform-without-replacement?** Out of scope. The
    hypergeometric projection the consumer's theory relies on (`theory/sfs.md`) assumes
    exactly this scheme; a `SamplingScheme` abstraction with one implementation would
    be speculative. Note it as a future extension point and move on.
+   **Resolved: stayed out of scope.** No `SamplingScheme` abstraction was added;
+   `sample_leaves`/`sample_trees` implement uniform-without-replacement only.
 6. **Local registry (repo-family concern, mentioned here for context).** This package
    is about to have three dev-path consumers, and `Manifest.toml` portability is
    already a known problem (an absolute `/Users/alexanderstein/...` path). A private
    `LocalRegistry.jl` registry would let consumers depend on versioned releases
    instead of dev paths. Not part of this work; raised because tagging 0.3.0 is the
    moment it becomes worth doing.
+   **Resolved: deferred, as scoped.** Not part of this work; consumers still depend
+   on this package via `Pkg.develop` local paths. Remains open for a future session.
 
 ---
 

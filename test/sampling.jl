@@ -95,6 +95,17 @@ end
     @test_throws ArgumentError sample_leaves(root, 4; seed = UInt64(1))
 end
 
+@testset "sample_leaves on a single-node tree (M-4)" begin
+    # The bounds test the spec (§5) called for but the suite never got: a tree
+    # with exactly one leaf, which is also its own root.
+    root = BinaryNode(NonMarkovCell(1, 0.0, 0, 1.0))
+    s = sample_leaves(root, 1; seed = UInt64(1))
+    @test s.sampled_ids == Int64[1]
+    @test s.N_full == 1
+    @test s.root.data.id == 1
+    @test_throws ArgumentError sample_leaves(root, 2; seed = UInt64(1))
+end
+
 @testset "sample_leaves accepts a Population" begin
     pop = simple_sampling_pop()
     s = sample_leaves(pop, 10; seed = UInt64(3))
@@ -346,7 +357,7 @@ end
 
 @testset "sample_trees validates n against the tree before drawing" begin
     root = sampling_fixture()
-    # Largest first, so a too-large n fails before any work is done.
+    # All sizes are validated before any draw is made, regardless of order.
     @test_throws ArgumentError sample_trees(root, SamplingSpec([9, 1]);
                                            seed = UInt64(1))
 end

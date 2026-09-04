@@ -125,6 +125,8 @@ function sample_leaves(population::Population, n::Int;
     root = getsingleroot(allcells(population))
     if isnothing(root)
         nroots = length(AbstractTrees.getroot(allcells(population)))
+        nroots == 0 && throw(ArgumentError(
+            "population has no cells to sample from"))
         throw(ArgumentError(
             "population has $nroots independent roots (it is a forest), but " *
             "sampling needs one — sample each root's tree separately"))
@@ -224,8 +226,8 @@ _draw_seed(base::UInt64, n::Int, replicate::Int) = hash((base, n, replicate))
 
 Apply a [`SamplingSpec`](@ref) to one finished tree.
 
-Sizes are validated against the tree, largest first, *before* any draw is made, so
-a size larger than the tree fails immediately rather than after minutes of work.
+Sizes are validated against the tree *before* any draw is made, so a size larger
+than the tree fails immediately rather than after minutes of work.
 Per-draw seeds are derived from `seed`, the size and the replicate index and are
 recorded on each [`LeafSample`](@ref).
 
@@ -236,7 +238,10 @@ describe things that happen *during* `simulate!`.
 function sample_trees(root::BinaryNode{NonMarkovCell}, spec::SamplingSpec;
                       seed::UInt64)
     N_full = length(collect(Leaves(root)))
-    for n in sort(spec.sizes; rev = true)
+    # Every size is validated here before any draw is made below, regardless of
+    # order — sorting first would only change which oversized size's message is
+    # raised when more than one is invalid, not whether validation precedes drawing.
+    for n in spec.sizes
         n <= N_full || throw(ArgumentError(
             "SamplingSpec asks for n = $n cells but the tree has $N_full leaves"))
     end
@@ -253,6 +258,8 @@ function sample_trees(population::Population, spec::SamplingSpec; seed::UInt64)
     root = getsingleroot(allcells(population))
     if isnothing(root)
         nroots = length(AbstractTrees.getroot(allcells(population)))
+        nroots == 0 && throw(ArgumentError(
+            "population has no cells to sample from"))
         throw(ArgumentError(
             "population has $nroots independent roots (it is a forest), but " *
             "sampling needs one — sample each root's tree separately"))
