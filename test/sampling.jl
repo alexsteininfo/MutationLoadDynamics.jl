@@ -342,3 +342,70 @@ end
     @test_throws ArgumentError sample_trees(root, SamplingSpec([9, 1]);
                                            seed = UInt64(1))
 end
+
+@testset "END TO END: grow, sample, and check against the population" begin
+    pop  = simple_sampling_pop(Nmax = 300, ν = 2.0, rng = MersenneTwister(2024))
+    out  = sample_trees(pop, SamplingSpec([300, 30, 3]); seed = UInt64(0xC0FFEE))
+
+    @test !isnothing(out.full)
+    @test length(out.samples) == 3
+    for s in out.samples
+        @test s.N_full == popsize(pop)
+        @test length(s.sampled_ids) == s.n
+        @test allunique(s.sampled_ids)
+        @test all(id -> haskey(pop.cells, id), s.sampled_ids)
+        @test length(collect(Leaves(s.root))) == s.n
+    end
+
+    # n = N_full is the whole population: every statistic must match exactly.
+    whole = out.samples[1]
+    @test whole.n == popsize(pop)
+    @test sort(mutations_per_cell(whole.root)) == sort(mutations_per_cell(pop))
+    @test sitefrequencyspectrum(whole.root, popsize(pop)) ==
+          sitefrequencyspectrum(pop)
+    @test sort(leaf_depths(whole.root)) ==
+          sort(leaf_depths(getsingleroot(allcells(pop))))
+end
+
+@testset "END TO END: sampling a tree that death has pruned" begin
+    # d > 0 means prune_tree! has removed dead lineages, leaving unary nodes in the
+    # stored tree already. A sampled tree must be indistinguishable in kind.
+    block = NonMarkovBlock(
+        birth_dist     = f -> Gamma(5.0, 1.0 / (5.0 * f)),
+        death_dist     = f -> Gamma(5.0, 1.0 / (5.0 * 0.5)),
+        stopfunction   = pop -> popsize(pop) >= 200,
+        driver_dist    = Dirac(0.0),
+        fitness_update = (f, δ) -> f,
+        ν              = 2.0,
+        restart_on_extinction = true,
+    )
+    pop = initialize_population(fitness_init = 1.0)
+    simulate!(pop, block, MersenneTwister(7))
+
+    root   = getsingleroot(allcells(pop))
+    burden = id_burden_map(root)
+    s = sample_leaves(root, 20; seed = UInt64(31))
+
+    @test id_burden_map(s.root) == Dict(id => burden[id] for id in s.sampled_ids)
+    @test length(collect(Leaves(s.root))) == 20
+    @test isnothing(s.root.parent)
+    for node in PreOrderDFS(s.root)
+        isnothing(node.left)  || @test node.left.parent  === node
+        isnothing(node.right) || @test node.right.parent === node
+    end
+end
+
+@testset "sampling a forest is rejected by name (HR-8)" begin
+    # Two independent founders: getsingleroot returns nothing, and both the
+    # single-draw and the spec-driven entry points must say so rather than
+    # silently sampling one tree of the forest.
+    pop = initialize_population(fitness_init = 1.0)
+    second = BinaryNode(NonMarkovCell(pop._next_id + 1, 0.0, 0, 1.0))
+    pop.cells[second.data.id] = second
+    pop._next_id += 1
+
+    @test_throws ArgumentError sample_leaves(pop, 1; seed = UInt64(1))
+    @test_throws ArgumentError sample_trees(pop, SamplingSpec(1); seed = UInt64(1))
+    err = try sample_leaves(pop, 1; seed = UInt64(1)) catch e; e end
+    @test occursin("2 independent roots", err.msg)
+end
