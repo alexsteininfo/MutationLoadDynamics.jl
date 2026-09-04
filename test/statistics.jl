@@ -78,3 +78,44 @@ end
     @test mk >= 0.0
     @test vk >= 0.0
 end
+
+# ── Fixture shared by the promoted tree statistics ────────────────────────────
+# Hand-built tree with observables known by hand; the expected values below are
+# the HR-10 ground truth carried over from the study repo's verifier.
+#
+#   root (id 1, mut 5) ├── L (id 2, mut 1) ├── LL (id 4, mut 2) leaf
+#                      │                   └── LR (id 5, mut 3) leaf
+#                      └── R (id 3, mut 7) leaf
+function fixture_tree()
+    root = BinaryNode(NonMarkovCell(1, 0.0, 5, 1.0))
+    L = leftchild!(root,  NonMarkovCell(2, 1.0, 1, 1.0))
+    rightchild!(root,     NonMarkovCell(3, 1.2, 7, 1.0))
+    leftchild!(L,         NonMarkovCell(4, 2.0, 2, 1.0))
+    rightchild!(L,        NonMarkovCell(5, 2.1, 3, 1.0))
+    return root
+end
+
+@testset "fixture has the expected shape" begin
+    root = fixture_tree()
+    @test [l.data.id for l in Leaves(root)] == [4, 5, 3]
+    @test mutations_per_cell(root) == [8, 9, 12]
+end
+
+@testset "leaf_depths on the fixture" begin
+    root = fixture_tree()
+    # Stack order, not Leaves order: the function pushes left then right and pops
+    # last-in-first-out, so R (depth 1) is emitted before LL and LR (depth 2).
+    @test leaf_depths(root) == [1, 2, 2]
+end
+
+@testset "leaf_depths on a single-node tree" begin
+    root = BinaryNode(NonMarkovCell(1, 0.0, 3, 1.0))
+    @test leaf_depths(root) == [0]
+end
+
+@testset "leaf_depths length matches the leaf count" begin
+    pop  = simple_pop(Nmax = 40)
+    root = getsingleroot(allcells(pop))
+    @test length(leaf_depths(root)) == popsize(pop)
+    @test all(d >= 0 for d in leaf_depths(root))
+end

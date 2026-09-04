@@ -241,3 +241,37 @@ function _sfs_fill!(node::BinaryNode, sfs::Vector{Int64})
     count > 0 && (sfs[count] += node.data.mutations)
     return count
 end
+
+# ── Leaf divisional depths ────────────────────────────────────────────────────
+
+"""
+    leaf_depths(root::BinaryNode) -> Vector{Int}
+
+Number of division events on the path from `root` to each leaf.
+
+For neutral simulations (`ν = 0`) this is the primary quantity: mutations per cell
+follow by drawing `Poisson(m * depth)` per leaf afterwards.
+
+!!! warning "Not co-indexed"
+    The returned vector is in this function's own stack order, which is *not*
+    `Leaves(root)` order. `mutations_per_cell` and `leaf_fitness` both iterate
+    `getalivecells(root)` and so are co-indexed with each other; `leaf_depths` is
+    not co-indexed with either, and is valid only as a pooled distribution. The
+    order is load-bearing — 4.3 GB of stored arrays were produced with it — so do
+    not "fix" it to `Leaves` order. Add a separate co-indexed variant if one is
+    ever needed.
+"""
+function leaf_depths(root::BinaryNode{T}) where {T <: AbstractTreeCell}
+    depths = Int[]
+    stack  = Tuple{BinaryNode{T}, Int}[(root, 0)]
+    while !isempty(stack)
+        node, d = pop!(stack)
+        if isnothing(node.left) && isnothing(node.right)
+            push!(depths, d)
+        else
+            isnothing(node.left)  || push!(stack, (node.left,  d + 1))
+            isnothing(node.right) || push!(stack, (node.right, d + 1))
+        end
+    end
+    return depths
+end
