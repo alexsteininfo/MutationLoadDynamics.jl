@@ -303,8 +303,10 @@ a tree returned by [`sample_leaves`](@ref), where the meaningful length is the
 sample size `n`. `N` larger than the leaf count is allowed and pads with zeros;
 `N` smaller than the leaf count is an error.
 
-Mutations on the root's own edge are accumulated into `sfs[N]`, i.e. they are
-treated as clonal in the given tree.
+Mutations on the root's own edge are accumulated into `sfs[n]`, where `n` is the
+tree's actual alive-leaf count — i.e. they are treated as clonal in the given
+tree. Note `n`, not `N`: when `N` is larger than the leaf count the spectrum is
+zero-padded above `n`, so the clonal bin stays at `n`.
 """
 function sitefrequencyspectrum(root::BinaryNode, N::Int)
     _check_spectrum_length(root, N, "sitefrequencyspectrum")
@@ -348,7 +350,7 @@ branch_spectrum(root::BinaryNode) = branch_spectrum(root, _n_alive_leaves(root))
 # ── Filtered burdens and leaf fitness ────────────────────────────────────────
 
 function _count_descendants!(node::BinaryNode{T},
-                             desc::Dict{BinaryNode{T}, Int}) where {T}
+                             desc::Dict{BinaryNode{T}, Int}) where {T <: AbstractTreeCell}
     if isnothing(node.left) && isnothing(node.right)
         desc[node] = 1
         return 1
@@ -377,7 +379,7 @@ Two passes: post-order descendant counts, then per-leaf accumulation. Returned i
 `Leaves(root)` order.
 """
 function filtered_mutations_per_cell(root::BinaryNode{T},
-                                     threshold::Float64) where {T}
+                                     threshold::Float64) where {T <: AbstractTreeCell}
     N         = length(collect(Leaves(root)))
     max_count = floor(Int, threshold * N)
 
