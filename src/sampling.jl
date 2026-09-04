@@ -123,8 +123,11 @@ end
 function sample_leaves(population::Population, n::Int;
                        seed::UInt64, replicate::Int = 1)
     root = getsingleroot(allcells(population))
-    isnothing(root) && throw(ArgumentError(
-        "population has no single common ancestor (it is a forest) — sampling " *
-        "needs one root; sample each root's tree separately"))
+    if isnothing(root)
+        nroots = length(AbstractTrees.getroot(allcells(population)))
+        throw(ArgumentError(
+            "population has $nroots independent roots (it is a forest), but " *
+            "sampling needs one — sample each root's tree separately"))
+    end
     return sample_leaves(root, n; seed = seed, replicate = replicate)
 end

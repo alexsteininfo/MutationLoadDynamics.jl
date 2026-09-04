@@ -56,6 +56,22 @@ end
     end
 end
 
+@testset "GOLDEN LITERALS: frozen draw output (HR-1)" begin
+    # Captured once from a passing run under Julia 1.12.1 and FROZEN. These are
+    # literal expected values, not a re-derivation of the recipe — that is the
+    # point. If this testset fails, the draw recipe changed and every serialized
+    # sampled tree on disk became unreproducible. Fix the code; never edit these
+    # numbers to match new behaviour.
+    #
+    # The companion "GOLDEN" testset above re-derives the recipe and catches a
+    # different class of change (a wrong RNG or sampler). Keep both.
+    root = sampling_fixture()
+    @test sample_leaves(root, 1; seed = UInt64(1)).sampled_ids  == Int64[3]
+    @test sample_leaves(root, 2; seed = UInt64(1)).sampled_ids  == Int64[3, 5]
+    @test sample_leaves(root, 2; seed = UInt64(42)).sampled_ids == Int64[5, 3]
+    @test sample_leaves(root, 3; seed = UInt64(7)).sampled_ids  == Int64[5, 3, 4]
+end
+
 @testset "n = N_full reproduces the source tree exactly" begin
     root = sampling_fixture()
     s = sample_leaves(root, 3; seed = UInt64(1))
