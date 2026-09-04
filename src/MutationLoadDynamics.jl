@@ -49,6 +49,11 @@ leaf_depths,
 branch_spectrum,
 filtered_mutations_per_cell,
 leaf_fitness,
+
+# Sampling
+LeafSample,
+sample_leaves,
+
 fitness_per_cell,
 fitness_distribution,
 mean_k,
@@ -77,6 +82,7 @@ include("initialisation.jl")
 include("cellupdates.jl")
 include("simulation_trees.jl")
 include("statistics.jl")
+include("sampling.jl")
 include("measurements.jl")
 include("simulations.jl")
 

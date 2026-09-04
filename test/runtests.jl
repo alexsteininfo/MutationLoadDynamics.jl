@@ -14,6 +14,7 @@ tests = [
     "regression",
     "chaining",
     "statistics",
+    "sampling",
 ]
 
 @testset "MutationLoadDynamics.jl" begin
