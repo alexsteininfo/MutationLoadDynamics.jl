@@ -131,3 +131,119 @@ function sample_leaves(population::Population, n::Int;
     end
     return sample_leaves(root, n; seed = seed, replicate = replicate)
 end
+
+# ── Declaring what to produce ────────────────────────────────────────────────
+
+"""
+    SamplingSpec(; sizes = Int[], replicates = 1, retain_full = true)
+    SamplingSpec(n::Int)
+    SamplingSpec(sizes::Vector{Int})
+
+What [`sample_trees`](@ref) should produce from one finished tree.
+
+| intent | spec |
+|---|---|
+| full data only | `SamplingSpec()` |
+| one sample of size `n` only | `SamplingSpec(sizes = [n], retain_full = false)` |
+| full data plus several sizes | `SamplingSpec([1000, 100])` |
+
+# Keyword arguments
+- `sizes` — sample sizes to draw. Empty draws nothing. No duplicates: use
+  `replicates` for repeated draws at the same size.
+- `replicates` — independent draws per size, each with its own derived seed.
+- `retain_full` — whether the returned [`SampledTrees`](@ref) carries the full
+  tree.
+
+!!! note "`retain_full = false` does not free memory by itself"
+    It controls only what the returned bundle holds. It cannot release the
+    caller's own reference to the tree, and it cannot release the tree reachable
+    from a `Population` — every alive leaf holds a `parent` chain back to the
+    founder, so while the population is alive the whole tree is alive. To
+    actually bound memory across a sweep, drop both yourself:
+
+    ```julia
+    out = sample_trees(pop, SamplingSpec(sizes = [1000], retain_full = false);
+                       seed = myseed)
+    pop = nothing
+    GC.gc()
+    ```
+"""
+struct SamplingSpec
+    sizes::Vector{Int}
+    replicates::Int
+    retain_full::Bool
+end
+
+function SamplingSpec(; sizes::AbstractVector{<:Integer} = Int[],
+                        replicates::Integer = 1,
+                        retain_full::Bool = true)
+    sizes = Int[Int(n) for n in sizes]
+    allunique(sizes) || throw(ArgumentError(
+        "SamplingSpec: duplicate sample sizes in $sizes — use `replicates` for " *
+        "repeated draws at the same size"))
+    all(>=(1), sizes) || throw(ArgumentError(
+        "SamplingSpec: every sample size must be >= 1, got $sizes"))
+    replicates >= 1 || throw(ArgumentError(
+        "SamplingSpec: replicates must be >= 1, got $replicates"))
+    return SamplingSpec(sizes, Int(replicates), retain_full)
+end
+
+SamplingSpec(n::Integer) = SamplingSpec(sizes = [n])
+SamplingSpec(sizes::AbstractVector{<:Integer}) = SamplingSpec(sizes = sizes)
+
+"""
+    SampledTrees
+
+Result of [`sample_trees`](@ref): the full tree (or `nothing` when
+`retain_full = false`) and every draw requested by the spec.
+
+`samples` is ordered by the spec's `sizes`, and within a size by `replicate`.
+"""
+struct SampledTrees
+    full::Union{BinaryNode{NonMarkovCell}, Nothing}
+    samples::Vector{LeafSample}
+end
+
+# Per-draw seed. Depends on the base seed, the size and the replicate index, so no
+# two draws in one spec share a seed, and each stored seed replays its own draw in
+# isolation.
+_draw_seed(base::UInt64, n::Int, replicate::Int) = hash((base, n, replicate))
+
+"""
+    sample_trees(root, spec; seed) -> SampledTrees
+    sample_trees(population, spec; seed) -> SampledTrees
+
+Apply a [`SamplingSpec`](@ref) to one finished tree.
+
+Sizes are validated against the tree, largest first, *before* any draw is made, so
+a size larger than the tree fails immediately rather than after minutes of work.
+Per-draw seeds are derived from `seed`, the size and the replicate index and are
+recorded on each [`LeafSample`](@ref).
+
+Sampling is post-hoc: it applies to a tree that has finished growing. It is
+deliberately not part of `NonMarkovBlock` or `MeasurementSpec`, both of which
+describe things that happen *during* `simulate!`.
+"""
+function sample_trees(root::BinaryNode{NonMarkovCell}, spec::SamplingSpec;
+                      seed::UInt64)
+    N_full = length(collect(Leaves(root)))
+    for n in sort(spec.sizes; rev = true)
+        n <= N_full || throw(ArgumentError(
+            "SamplingSpec asks for n = $n cells but the tree has $N_full leaves"))
+    end
+
+    samples = LeafSample[]
+    for n in spec.sizes, r in 1:spec.replicates
+        push!(samples, sample_leaves(root, n;
+                                     seed = _draw_seed(seed, n, r), replicate = r))
+    end
+    return SampledTrees(spec.retain_full ? root : nothing, samples)
+end
+
+function sample_trees(population::Population, spec::SamplingSpec; seed::UInt64)
+    root = getsingleroot(allcells(population))
+    isnothing(root) && throw(ArgumentError(
+        "population has no single common ancestor (it is a forest) — sampling " *
+        "needs one root; sample each root's tree separately"))
+    return sample_trees(root, spec; seed = seed)
+end

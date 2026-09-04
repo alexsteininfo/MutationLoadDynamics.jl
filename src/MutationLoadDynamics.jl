@@ -53,6 +53,9 @@ leaf_fitness,
 # Sampling
 LeafSample,
 sample_leaves,
+SamplingSpec,
+SampledTrees,
+sample_trees,
 
 fitness_per_cell,
 fitness_distribution,

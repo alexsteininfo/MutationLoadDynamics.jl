@@ -273,3 +273,72 @@ end
         @test sum(k * sfs[k] for k in 1:n) == sum(mutations_per_cell(s.root))
     end
 end
+
+@testset "SamplingSpec constructors express the three modes" begin
+    @test SamplingSpec().sizes == Int[]
+    @test SamplingSpec().retain_full
+    @test SamplingSpec(100).sizes == [100]
+    @test SamplingSpec([1000, 100]).sizes == [1000, 100]
+    @test SamplingSpec(sizes = [10], retain_full = false).retain_full == false
+    @test SamplingSpec().replicates == 1
+end
+
+@testset "SamplingSpec validates its inputs" begin
+    @test_throws ArgumentError SamplingSpec(sizes = [10, 10])       # duplicate
+    @test_throws ArgumentError SamplingSpec(sizes = [0])            # n < 1
+    @test_throws ArgumentError SamplingSpec(sizes = [10], replicates = 0)
+end
+
+@testset "sample_trees: full data only" begin
+    root = sampling_fixture()
+    out  = sample_trees(root, SamplingSpec(); seed = UInt64(1))
+    @test out isa SampledTrees
+    @test out.full === root
+    @test isempty(out.samples)
+end
+
+@testset "sample_trees: one sample size, no full tree" begin
+    root = sampling_fixture()
+    out  = sample_trees(root, SamplingSpec(sizes = [2], retain_full = false);
+                        seed = UInt64(1))
+    @test isnothing(out.full)
+    @test length(out.samples) == 1
+    @test out.samples[1].n == 2
+end
+
+@testset "sample_trees: full tree plus several sizes" begin
+    root = sampling_fixture()
+    out  = sample_trees(root, SamplingSpec([3, 2, 1]); seed = UInt64(1))
+    @test out.full === root
+    @test [s.n for s in out.samples] == [3, 2, 1]
+    @test allunique([s.seed for s in out.samples])
+end
+
+@testset "sample_trees: replicates give distinct draws and distinct seeds" begin
+    pop = simple_sampling_pop(Nmax = 100)
+    out = sample_trees(pop, SamplingSpec(sizes = [10], replicates = 3);
+                       seed = UInt64(77))
+    @test length(out.samples) == 3
+    @test [s.replicate for s in out.samples] == [1, 2, 3]
+    @test allunique([s.seed for s in out.samples])
+    @test allunique([s.sampled_ids for s in out.samples])
+    @test all(s -> s.n == 10, out.samples)
+end
+
+@testset "sample_trees derives seeds reproducibly from the base seed" begin
+    root = sampling_fixture()
+    a = sample_trees(root, SamplingSpec([2, 1]); seed = UInt64(5))
+    b = sample_trees(root, SamplingSpec([2, 1]); seed = UInt64(5))
+    @test [s.sampled_ids for s in a.samples] == [s.sampled_ids for s in b.samples]
+    # And each stored seed replays its own draw in isolation.
+    for s in a.samples
+        @test sample_leaves(root, s.n; seed = s.seed).sampled_ids == s.sampled_ids
+    end
+end
+
+@testset "sample_trees validates n against the tree before drawing" begin
+    root = sampling_fixture()
+    # Largest first, so a too-large n fails before any work is done.
+    @test_throws ArgumentError sample_trees(root, SamplingSpec([9, 1]);
+                                           seed = UInt64(1))
+end
