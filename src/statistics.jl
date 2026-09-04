@@ -344,3 +344,65 @@ function branch_spectrum(root::BinaryNode, N::Int)
 end
 
 branch_spectrum(root::BinaryNode) = branch_spectrum(root, _n_alive_leaves(root))
+
+# ── Filtered burdens and leaf fitness ────────────────────────────────────────
+
+function _count_descendants!(node::BinaryNode{T},
+                             desc::Dict{BinaryNode{T}, Int}) where {T}
+    if isnothing(node.left) && isnothing(node.right)
+        desc[node] = 1
+        return 1
+    end
+    count = 0
+    isnothing(node.left)  || (count += _count_descendants!(node.left,  desc))
+    isnothing(node.right) || (count += _count_descendants!(node.right, desc))
+    desc[node] = count
+    return count
+end
+
+"""
+    filtered_mutations_per_cell(root::BinaryNode, threshold::Float64) -> Vector{Int}
+
+Per-leaf mutational burden, excluding mutations from any ancestral node whose
+live-descendant count exceeds `floor(threshold * N)`, where `N` is the tree's
+leaf count.
+
+This is the tree-side analogue of dropping high-frequency variants before
+estimating a mutation rate: a node subtending a large fraction of the population
+contributes the same mutations to every cell below it, so it carries no
+information about within-clone divergence. `threshold = 1.0` excludes nothing and
+reproduces [`mutations_per_cell`](@ref).
+
+Two passes: post-order descendant counts, then per-leaf accumulation. Returned in
+`Leaves(root)` order.
+"""
+function filtered_mutations_per_cell(root::BinaryNode{T},
+                                     threshold::Float64) where {T}
+    N         = length(collect(Leaves(root)))
+    max_count = floor(Int, threshold * N)
+
+    desc = Dict{BinaryNode{T}, Int}()
+    _count_descendants!(root, desc)
+
+    result = Int[]
+    for leaf in Leaves(root)
+        muts = leaf.data.mutations
+        node = leaf
+        while !isnothing(node.parent)
+            node = node.parent
+            desc[node] <= max_count && (muts += node.data.mutations)
+        end
+        push!(result, muts)
+    end
+    return result
+end
+
+"""
+    leaf_fitness(root::BinaryNode) -> Vector{Float64}
+
+Fitness of every alive leaf, in `getalivecells(root)` order — the same traversal
+[`mutations_per_cell`](@ref) uses, so the two are **co-indexed**: entry `i` is the
+same cell in both. Note that [`leaf_depths`](@ref) is *not* co-indexed with
+either.
+"""
+leaf_fitness(root::BinaryNode) = [leaf.data.fitness for leaf in getalivecells(root)]

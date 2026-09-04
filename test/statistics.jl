@@ -169,3 +169,47 @@ end
     root = fixture_tree()
     @test_throws ArgumentError branch_spectrum(root, 2)
 end
+
+@testset "leaf_fitness on the fixture" begin
+    root = fixture_tree()
+    @test leaf_fitness(root) == [1.0, 1.0, 1.0]
+end
+
+@testset "leaf_fitness is co-indexed with mutations_per_cell" begin
+    root = fixture_tree()
+    # Both iterate getalivecells(root), so entry i is the same cell in both.
+    ids = [l.data.id for l in getalivecells(root)]
+    @test ids == [4, 5, 3]
+    @test length(leaf_fitness(root)) == length(mutations_per_cell(root))
+end
+
+@testset "leaf_fitness picks up a driver" begin
+    root = fixture_tree()
+    leaf = first(getalivecells(root))
+    c    = leaf.data
+    leaf.data = NonMarkovCell(c.id, c.birthtime, c.mutations, 1.5)
+    @test leaf_fitness(root) == [1.5, 1.0, 1.0]
+end
+
+@testset "filtered_mutations_per_cell with threshold 1.0 equals the full burden" begin
+    root = fixture_tree()
+    # floor(1.0 * 3) = 3, so no node is excluded.
+    @test filtered_mutations_per_cell(root, 1.0) == mutations_per_cell(root)
+end
+
+@testset "filtered_mutations_per_cell excludes the root at a low threshold" begin
+    root = fixture_tree()
+    # floor(0.5 * 3) = 1, so only nodes with <= 1 live descendant contribute from
+    # the ancestry: the root (3 descendants) and L (2 descendants) are excluded, so
+    # each leaf keeps only its own mutations: [2, 3, 7].
+    @test filtered_mutations_per_cell(root, 0.5) == [2, 3, 7]
+end
+
+@testset "filtered_mutations_per_cell is bounded by the full burden" begin
+    pop  = simple_pop(ν = 2.0, Nmax = 40)
+    root = getsingleroot(allcells(pop))
+    full = mutations_per_cell(root)
+    filt = filtered_mutations_per_cell(root, 0.3)
+    @test length(filt) == length(full)
+    @test all(filt .<= full)
+end
