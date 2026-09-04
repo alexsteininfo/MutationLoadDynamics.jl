@@ -275,3 +275,72 @@ function leaf_depths(root::BinaryNode{T}) where {T <: AbstractTreeCell}
     end
     return depths
 end
+
+# ── Root-based spectra ────────────────────────────────────────────────────────
+
+# Alive-leaf count of a stored tree. `celldeath!` prunes dead cells out of the
+# tree entirely and `isalive(::NonMarkovCell)` is always `true`, so this equals
+# `length(collect(Leaves(root)))` for any tree this package produces.
+_n_alive_leaves(root::BinaryNode) = length(getalivecells(root))
+
+function _check_spectrum_length(root::BinaryNode, N::Int, what::String)
+    n = _n_alive_leaves(root)
+    n <= N || throw(ArgumentError(
+        "$what: tree has $n alive leaves but N = $N — the spectrum would " *
+        "overflow. Pass N >= $n."))
+    return nothing
+end
+
+"""
+    sitefrequencyspectrum(root::BinaryNode[, N::Int]) -> Vector{Int64}
+
+Site-frequency spectrum of a lineage tree: `sfs[k]` is the number of mutation
+events carried by exactly `k` of the tree's leaves. The returned vector has
+length `N`, which defaults to the tree's alive-leaf count.
+
+Pass `N` explicitly when the spectrum must have a particular length — notably for
+a tree returned by [`sample_leaves`](@ref), where the meaningful length is the
+sample size `n`. `N` larger than the leaf count is allowed and pads with zeros;
+`N` smaller than the leaf count is an error.
+
+Mutations on the root's own edge are accumulated into `sfs[N]`, i.e. they are
+treated as clonal in the given tree.
+"""
+function sitefrequencyspectrum(root::BinaryNode, N::Int)
+    _check_spectrum_length(root, N, "sitefrequencyspectrum")
+    sfs = zeros(Int64, N)
+    _sfs_fill!(root, sfs)
+    return sfs
+end
+
+sitefrequencyspectrum(root::BinaryNode) =
+    sitefrequencyspectrum(root, _n_alive_leaves(root))
+
+function _branch_spectrum_fill!(node::BinaryNode, bs::Vector{Int})
+    isnothing(node.left) && isnothing(node.right) && return 1
+    count = 0
+    isnothing(node.left)  || (count += _branch_spectrum_fill!(node.left,  bs))
+    isnothing(node.right) || (count += _branch_spectrum_fill!(node.right, bs))
+    count > 0 && (bs[count] += 1)
+    return count
+end
+
+"""
+    branch_spectrum(root::BinaryNode[, N::Int]) -> Vector{Int}
+
+Topological site-frequency spectrum: `bs[k]` is the number of internal nodes
+subtending exactly `k` leaves. Leaves themselves are not counted.
+
+For neutral mutations this encodes the full tree topology — under any neutral
+per-division mutation rate `m`, the expected SFS is `E[sfs[k]] = m * bs[k]`, so
+the branch spectrum separates topology from mutation rate. Length and `N`
+semantics match [`sitefrequencyspectrum`](@ref).
+"""
+function branch_spectrum(root::BinaryNode, N::Int)
+    _check_spectrum_length(root, N, "branch_spectrum")
+    bs = zeros(Int, N)
+    _branch_spectrum_fill!(root, bs)
+    return bs
+end
+
+branch_spectrum(root::BinaryNode) = branch_spectrum(root, _n_alive_leaves(root))

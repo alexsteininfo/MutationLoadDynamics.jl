@@ -119,3 +119,53 @@ end
     @test length(leaf_depths(root)) == popsize(pop)
     @test all(d >= 0 for d in leaf_depths(root))
 end
+
+@testset "root-based sitefrequencyspectrum on the fixture" begin
+    root = fixture_tree()
+    # sfs[1] = 2 + 3 + 7 (the three leaves' own mutations)
+    # sfs[2] = 1         (L subtends LL and LR)
+    # sfs[3] = 5         (the root subtends all three leaves)
+    @test sitefrequencyspectrum(root, 3) == [12, 1, 5]
+    @test sitefrequencyspectrum(root)    == [12, 1, 5]
+end
+
+@testset "root-based sitefrequencyspectrum agrees with the population method" begin
+    pop  = simple_pop(ν = 2.0, Nmax = 40)
+    root = getsingleroot(allcells(pop))
+    @test sitefrequencyspectrum(root, popsize(pop)) == sitefrequencyspectrum(pop)
+end
+
+@testset "sitefrequencyspectrum accepts N larger than the leaf count" begin
+    root = fixture_tree()
+    # Padding with zeros is legitimate: a caller may want a fixed-length spectrum.
+    @test sitefrequencyspectrum(root, 5) == [12, 1, 5, 0, 0]
+end
+
+@testset "sitefrequencyspectrum errors when N is too small" begin
+    root = fixture_tree()
+    @test_throws ArgumentError sitefrequencyspectrum(root, 2)
+end
+
+@testset "branch_spectrum on the fixture" begin
+    root = fixture_tree()
+    # L subtends 2 leaves, root subtends 3; leaves themselves are not counted.
+    @test branch_spectrum(root, 3) == [0, 1, 1]
+    @test branch_spectrum(root)    == [0, 1, 1]
+end
+
+@testset "branch_spectrum counts every internal node exactly once" begin
+    pop  = simple_pop(Nmax = 40)
+    root = getsingleroot(allcells(pop))
+    N    = popsize(pop)
+    bs   = branch_spectrum(root, N)
+    n_internal = count(n -> !isnothing(n.left) || !isnothing(n.right), PreOrderDFS(root))
+    @test sum(bs) == n_internal
+    # >= rather than == : simple_pop has a non-zero death rate, so prune_tree!
+    # can leave a unary node that subtends every leaf just as the root does.
+    @test bs[N] >= 1          # the root subtends every leaf
+end
+
+@testset "branch_spectrum errors when N is too small" begin
+    root = fixture_tree()
+    @test_throws ArgumentError branch_spectrum(root, 2)
+end
