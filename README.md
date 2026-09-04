@@ -11,6 +11,62 @@ Unlike Gillespie-based simulators where waiting times are exponentially distribu
 - **Global min-heap event queue** — O(log N) per event, no acceptance-rejection step
 - **Full binary tree preserved** — entire lineage tree stored as `BinaryNode{NonMarkovCell}`; supports SFS, pairwise distances, coalescence times
 - **Competing-risks birth/death** — both waiting times sampled at birth; the earlier fires
+- **Uniform leaf sampling** — draw `n` of `N` cells and get the induced lineage
+  tree, with each sampled cell's full-tree burden and divisional depth intact
+- **Tree statistics** — SFS, branch spectrum, per-cell burden, leaf depths and
+  leaf fitness, on a full or a sampled tree
+
+## Sampling a finished tree
+
+Real experiments sequence a few hundred or a few thousand cells out of a
+population of millions, so a simulated observable is only comparable to data once
+it has been through the same sampling.
+
+```julia
+out = sample_trees(pop, SamplingSpec([1000, 100]); seed = UInt64(0xBEEF))
+
+out.full                      # the whole tree, still there
+s = out.samples[1]            # LeafSample: n = 1000
+sitefrequencyspectrum(s.root, s.n)   # the sample's SFS
+mutations_per_cell(s.root)           # each sampled cell's FULL-TREE burden
+leaf_depths(s.root)                  # each sampled cell's FULL-TREE depth
+```
+
+Three modes: `SamplingSpec()` keeps the full tree only,
+`SamplingSpec(sizes = [n], retain_full = false)` returns one sample only, and
+`SamplingSpec([n1, n2])` returns the full tree plus several sizes. `replicates`
+gives several independent draws per size.
+
+### Prune, do not collapse
+
+The induced tree keeps the sampled leaves **plus every ancestor of a sampled
+leaf**, and retains the resulting unary nodes rather than merging them into their
+children. This is deliberate and load-bearing: because every division ancestral to
+a sampled cell is still a node, a sampled cell's root-to-leaf path is unchanged, so
+`mutations_per_cell` and `leaf_depths` return exactly that cell's *full-tree*
+burden and depth. Collapsing would turn depth into a count of bifurcations that
+survived sampling — a property of the sample rather than of the cell.
+
+It is also the shape `prune_tree!` already leaves behind when a lineage dies out,
+so a sampled tree is a `BinaryNode{NonMarkovCell}` indistinguishable in kind from a
+full one and every statistic applies to it unchanged.
+
+Two consequences worth knowing:
+
+- The **root of a sampled tree is the original founder, not the MRCA of the
+  sample**. Call `findMRCA` on the sampled leaves if you need that.
+- `retain_full = false` controls only what the returned bundle holds; it cannot
+  free the tree still reachable from your `Population`. Drop that reference
+  yourself to bound memory across a sweep.
+
+### Reproducibility
+
+`seed` is required, not optional: the draw is a pure function of
+`(tree, n, seed)`, and `LeafSample` records the seed it used, so any single draw
+replays in isolation. `sample_trees` derives one seed per `(size, replicate)` from
+the base seed. The draw recipe — `MersenneTwister(seed)` and
+`randperm(rng, N)[1:n]` over `Leaves` order — is frozen by a golden test, because
+serialized sampled trees produced by earlier runs must stay reproducible.
 
 ## Installation
 

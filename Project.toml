@@ -1,6 +1,6 @@
 name = "MutationLoadDynamics"
 uuid = "7b855ee6-6887-412f-a571-26d20a5a92d7"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Alexander Stein"]
 
 [deps]
