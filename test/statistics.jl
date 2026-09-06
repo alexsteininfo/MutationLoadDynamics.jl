@@ -129,6 +129,34 @@ end
     @test sitefrequencyspectrum(root)    == [12, 1, 5]
 end
 
+@testset "SFS on a forest counts every root's tree" begin
+    # `initialize_population(N)` seeds N independent founders, so the population is a
+    # forest and `sitefrequencyspectrum` takes its multi-root branch. That branch has to
+    # traverse the N *roots*; a version that traversed one representative alive *cell*
+    # per tree instead would fill only `sfs[1]`, from those leaves' own mutations, and
+    # silently lose almost every mutation in the population.
+    block = NonMarkovBlock(
+        birth_dist     = f -> Gamma(2.0, 1.0 / f),
+        death_dist     = f -> Gamma(2.0, 20.0),
+        stopfunction   = pop -> popsize(pop) >= 200,
+        driver_dist    = Exponential(0.1),
+        fitness_update = (f, δ) -> f + δ,
+        ν              = 1.0,
+    )
+    pop = initialize_population(20; fitness_init = 1.0)
+    simulate!(pop, block, MersenneTwister(11))
+
+    @test isnothing(getsingleroot(allcells(pop)))    # it really is a forest
+    sfs = sitefrequencyspectrum(pop)
+    @test length(sfs) == popsize(pop)
+
+    # Same identity the single-root test asserts: summing k-weighted spectrum entries
+    # recovers the total burden carried by the living cells.
+    N = popsize(pop)
+    @test sum(sfs[k] * k for k in 1:N) == sum(mutations_per_cell(pop))
+    @test sum(sfs) > popsize(pop) / 10   # not just the leaves' own mutations
+end
+
 @testset "root-based sitefrequencyspectrum agrees with the population method" begin
     pop  = simple_pop(ν = 2.0, Nmax = 40)
     root = getsingleroot(allcells(pop))

@@ -212,8 +212,12 @@ function sitefrequencyspectrum(population::Population)
     sfs  = zeros(Int64, popsize(population))
     root = getsingleroot(allcells(population))
     if isnothing(root)
-        # multiple independent roots (forest) — traverse each root separately
-        roots = unique(n -> objectid(_treeroot(n)), values(population.cells))
+        # Multiple independent roots (forest) — traverse each root separately.
+        # `unique` is applied to the roots themselves, not to the cells keyed by their
+        # root: `unique(f, itr)` returns elements of `itr`, so keying alive cells by
+        # `objectid(_treeroot(n))` yields one representative *cell* per tree rather than
+        # one root, and filling from a leaf silently drops that whole tree's mutations.
+        roots = unique(objectid, (_treeroot(n) for n in values(population.cells)))
         for r in roots
             _sfs_fill!(r, sfs)
         end
@@ -340,10 +344,19 @@ end
 Topological site-frequency spectrum: `bs[k]` is the number of internal nodes
 subtending exactly `k` leaves. Leaves themselves are not counted.
 
-For neutral mutations this encodes the full tree topology — under any neutral
-per-division mutation rate `m`, the expected SFS is `E[sfs[k]] = m * bs[k]`, so
-the branch spectrum separates topology from mutation rate. Length and `N`
-semantics match [`sitefrequencyspectrum`](@ref).
+For neutral mutations this encodes the full tree topology, separating it from the
+mutation rate: under any neutral per-division rate `m`,
+
+    E[sfs[k]] = m * bs[k]           for k >= 2
+    E[sfs[1]] = m * (bs[1] + n)     for k == 1
+
+where `n` is the tree's alive-leaf count. The `k = 1` case needs the extra `n`
+because a leaf's own edge also carries mutations into `sfs[1]`, while `bs`
+deliberately counts only internal nodes — so `bs[1]` is the number of *unary*
+internal nodes (a division whose other daughter's lineage died out), not the
+number of leaves.
+
+Length and `N` semantics match [`sitefrequencyspectrum`](@ref).
 """
 function branch_spectrum(root::BinaryNode, N::Int)
     _check_spectrum_length(root, N, "branch_spectrum")

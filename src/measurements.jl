@@ -115,6 +115,27 @@ end
 
 # ── Internal accumulator ──────────────────────────────────────────────────────
 
+"""
+    MeasurementAccumulator(spec::MeasurementSpec)
+
+Mutable collector that `simulate!` writes into. Build one from a
+[`MeasurementSpec`](@ref), pass it as the `accumulator` keyword, and call
+[`finalize_measurements`](@ref) afterwards to get an immutable [`Measurements`](@ref).
+
+```julia
+acc = MeasurementAccumulator(spec)
+simulate!(pop, block, rng; accumulator = acc)
+m   = finalize_measurements(acc)
+```
+
+One accumulator can be carried across chained `simulate!` calls: trajectory recording
+resumes at the current `population.t` rather than back-filling from zero, and a trigger
+that already fired is not fired again. An extinction restart clears it, so what it holds
+describes the successful attempt only.
+
+Its fields are internal bookkeeping — read results from `finalize_measurements`, which
+copies, leaving the accumulator usable afterwards.
+"""
 mutable struct MeasurementAccumulator
     spec::MeasurementSpec
     next_trajectory_t::Float64

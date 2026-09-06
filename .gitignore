@@ -4,6 +4,22 @@
 *.jl.*.cov
 *.jl.mem
 /docs/build/
+/docs/Manifest.toml
 
 # OS
 .DS_Store
+
+# Claude Code / superpowers working files — local only, never part of the package.
+# `.claude/` and `CLAUDE.md` are the agent's configuration and project memory;
+# `.superpowers/` is its workspace (ledgers, per-task briefs and reports);
+# `PLAN-*.md` and `todo.md` are design notes and scratch task lists written during
+# development. They are useful to keep on disk and useless to anyone cloning the
+# package, so they stay untracked. Note that adding a path here does nothing for a
+# file git is already tracking — those were removed from the index with
+# `git rm --cached` when this section was added.
+.claude/
+CLAUDE.md
+.superpowers/
+docs/superpowers/
+PLAN-*.md
+todo.md
