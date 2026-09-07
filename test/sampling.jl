@@ -65,11 +65,24 @@ end
     #
     # The companion "GOLDEN" testset above re-derives the recipe and catches a
     # different class of change (a wrong RNG or sampler). Keep both.
+    #
+    # Julia changed the algorithm behind `rand`/`randperm` range sampling in 1.11 (the CI
+    # floor is 1.9), so a `MersenneTwister` seed does not reproduce the same draws across
+    # that boundary. These literals are only meaningful on the Julia line they were
+    # captured on, so they are skipped below 1.11 rather than pinned to a stream that
+    # cannot match.
     root = sampling_fixture()
-    @test sample_leaves(root, 1; seed = UInt64(1)).sampled_ids  == Int64[3]
-    @test sample_leaves(root, 2; seed = UInt64(1)).sampled_ids  == Int64[3, 5]
-    @test sample_leaves(root, 2; seed = UInt64(42)).sampled_ids == Int64[5, 3]
-    @test sample_leaves(root, 3; seed = UInt64(7)).sampled_ids  == Int64[5, 3, 4]
+    if VERSION >= v"1.11"
+        @test sample_leaves(root, 1; seed = UInt64(1)).sampled_ids  == Int64[3]
+        @test sample_leaves(root, 2; seed = UInt64(1)).sampled_ids  == Int64[3, 5]
+        @test sample_leaves(root, 2; seed = UInt64(42)).sampled_ids == Int64[5, 3]
+        @test sample_leaves(root, 3; seed = UInt64(7)).sampled_ids  == Int64[5, 3, 4]
+    else
+        @test_skip sample_leaves(root, 1; seed = UInt64(1)).sampled_ids  == Int64[3]
+        @test_skip sample_leaves(root, 2; seed = UInt64(1)).sampled_ids  == Int64[3, 5]
+        @test_skip sample_leaves(root, 2; seed = UInt64(42)).sampled_ids == Int64[5, 3]
+        @test_skip sample_leaves(root, 3; seed = UInt64(7)).sampled_ids  == Int64[5, 3, 4]
+    end
 end
 
 @testset "n = N_full reproduces the source tree exactly" begin
