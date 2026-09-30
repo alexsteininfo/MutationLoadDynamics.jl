@@ -7,7 +7,7 @@
 ## `restart_on_extinction` retries automatically if the founding lineage dies out early.
 ##
 ## Inputs : none.  Outputs: summary statistics printed to stdout.
-## Run    : julia --project=. examples/SingleCellExpansion.jl
+## Run    : julia --project=. examples/01_SingleCellExpansion.jl
 ##
 
 using MutationLoadDynamics
@@ -44,14 +44,14 @@ println("  Std    : ", round(std(fits),  digits = 4))
 println("  Min    : ", round(minimum(fits), digits = 4))
 println("  Max    : ", round(maximum(fits), digits = 4))
 
-ks = mutations_per_cell(pop)
+ks = drivers_per_cell(pop)
 println("\nDriver mutations per cell:")
 println("  Mean   : ", round(mean(ks), digits = 2))
 println("  Min    : ", minimum(ks))
 println("  Max    : ", maximum(ks))
-println("  Clonal : ", clonal_mutations(pop), " (shared by all cells)")
+println("  Clonal : ", clonal_drivers(pop), " (shared by all cells)")
 
-sfs = sitefrequencyspectrum(pop)
+sfs = site_frequency_spectrum(pop)
 sfs_nonzero = [(n, sfs[n]) for n in eachindex(sfs) if sfs[n] > 0]
 println("\nDriver SFS (cells carrying, driver events) — first 10 classes:")
 for (freq, cnt) in first(sfs_nonzero, 10)

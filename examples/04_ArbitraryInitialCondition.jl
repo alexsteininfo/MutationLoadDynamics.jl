@@ -12,7 +12,7 @@
 ## a reproducible random sample of 30 cells.
 ##
 ## Inputs : none.  Outputs: summary statistics printed to stdout.
-## Run    : julia --project=. examples/ArbitraryInitialCondition.jl
+## Run    : julia --project=. examples/04_ArbitraryInitialCondition.jl
 ##
 
 using MutationLoadDynamics
@@ -34,15 +34,15 @@ block = NonMarkovBlock(
 )
 
 function summarise(label, pop, rng)
-    sfs = sitefrequencyspectrum(pop)
+    sfs = site_frequency_spectrum(pop)
     idx = randperm(rng, popsize(pop))[1:30]          # a random, reproducible subset
     println("=== $label ===")
     println("Simulation time    : ", round(pop.t, digits = 2))
     println("Mean fitness       : ", round(mean(fitness_per_cell(pop)), digits = 4))
-    println("Mean drivers/cell  : ", round(mean(mutations_per_cell(pop)), digits = 2))
-    println("Clonal drivers     : ", clonal_mutations(pop), "  (shared by all cells)")
+    println("Mean drivers/cell  : ", round(mean(drivers_per_cell(pop)), digits = 2))
+    println("Clonal drivers     : ", clonal_drivers(pop), "  (shared by all cells)")
     println("Singleton fraction : ", round(100 * sfs[1] / sum(sfs), digits = 1), "%")
-    println("Mean pairwise dist : ", round(mean(pairwisedistances(pop, idx)), digits = 2),
+    println("Mean pairwise dist : ", round(mean(pairwise_distances(pop, idx)), digits = 2),
             "  (30 random cells)")
     println()
 end

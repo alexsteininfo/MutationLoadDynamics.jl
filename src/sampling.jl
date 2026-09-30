@@ -1,14 +1,11 @@
 # Uniform leaf sampling of lineage trees.
 #
-# The induced tree keeps the sampled leaves plus *every ancestor* of a sampled
-# leaf, and retains the resulting unary nodes rather than collapsing them. Because
-# every division ancestral to a sampled cell is still a node, a sampled cell's
-# root-to-leaf path is unchanged, so `mutations_per_cell(root; includeclonal = true)`
-# and `leaf_depths` return exactly that cell's *full-tree* burden and divisional depth. Collapsing would turn depth into a count of
-# bifurcations that survived sampling — a property of the sample rather than of the
-# cell. It is also the shape `prune_tree!` already leaves behind when a lineage
-# dies out, so a sampled tree is indistinguishable in kind from a full one and
-# every statistic in `statistics.jl` applies to it unchanged.
+# The induced tree keeps the sampled leaves plus *every ancestor* of a sampled leaf, and
+# retains the resulting unary nodes rather than collapsing them. Every division ancestral
+# to a sampled cell is still a node, so a sampled cell's root-to-leaf path is unchanged:
+# `drivers_per_cell(root; includeclonal = true)` and `leaf_depths` return its full-tree
+# burden and divisional depth. It is the same shape `prune_tree!` leaves behind, so every
+# statistic applies to a sampled tree unchanged.
 
 """
     LeafSample
@@ -18,10 +15,10 @@ One uniform draw of `n` leaves from a lineage tree, with the induced tree.
 # Fields
 - `root::BinaryNode{NonMarkovCell}` — induced tree: the sampled leaves plus every
   ancestor of a sampled leaf, unary nodes retained. The original founder remains
-  the root even when it has a single child, so `sitefrequencyspectrum` accumulates
-  its mutations into `sfs[n]` exactly as it does into `sfs[N]` for a full tree.
-  **The root is therefore the founder, not the MRCA of the sample** — call
-  `findMRCA` on the sampled leaves if you need that.
+  the root even when it has a single child, so `site_frequency_spectrum` counts its
+  drivers in `sfs[n]` exactly as it does in `sfs[N]` for a full tree. **The root is
+  therefore the founder, not the MRCA of the sample** — call `find_mrca` on the sampled
+  leaves if you need that.
 - `n::Int` — cells drawn.
 - `N_full::Int` — leaf count of the source tree.
 - `seed::UInt64` — rng seed of this draw. The draw is a pure function of
@@ -32,10 +29,10 @@ One uniform draw of `n` leaves from a lineage tree, with the induced tree.
 - `sampled_ids::Vector{Int64}` — `NonMarkovCell.id` of each drawn cell, in draw
   order.
 
-The induced tree **shares** `node.data` with the source tree — `NonMarkovCell` is
-immutable, so ids, birthtimes, mutation counts and fitness are identical by
-construction rather than by copy. Replace a node's `data` wholesale if you need to
-change it (that rebinds only the sampled tree); never mutate a cell in place.
+The induced tree **shares** `node.data` with the source tree: `NonMarkovCell` is
+immutable, so ids, birthtimes, driver counts and fitness are identical by construction.
+Changing a node of the sampled tree (for example with [`set_fitness!`](@ref)) rebinds
+only that tree.
 """
 struct LeafSample
     root::BinaryNode{NonMarkovCell}
@@ -115,10 +112,9 @@ end
 Draw `n` of the tree's leaves uniformly without replacement and return the induced
 lineage tree as a [`LeafSample`](@ref).
 
-`seed` is required and supplied by the caller: the draw must be reproducible from
-values the caller itself records, and callers derive seeds from their own
-provenance (a filename stem, a simulation index). Two draws that should differ
-must be given different seeds. For one seed, draws at different `n` are nested: the
+`seed` (any integer in `0:typemax(UInt64)`) is required and supplied by the caller: the
+draw must be reproducible from values the caller itself records, such as a simulation
+index. Two draws that should differ must be given different seeds. For one seed, draws at different `n` are nested: the
 `n = 1` draw is the first cell of the `n = 2` draw, and so on.
 
 Non-destructive — `root` is left untouched, because the same tree is normally
@@ -132,14 +128,15 @@ Cost: one O(N) pass to list the leaves, plus the number of retained nodes.
     `StableRNG(seed)` drives a partial Fisher–Yates shuffle over `Leaves(root)` order.
     Stored samples depend on it; a golden test pins it.
 """
-sample_leaves(root::BinaryNode{NonMarkovCell}, n::Int; seed::UInt64, replicate::Int = 1) =
-    _sample_leaves(root, _leaves(root), n, seed, replicate)
+sample_leaves(root::BinaryNode{NonMarkovCell}, n::Integer; seed::Integer,
+              replicate::Integer = 1) =
+    _sample_leaves(root, _leaves(root), Int(n), UInt64(seed), Int(replicate))
 
-sample_leaves(population::Population, n::Int; seed::UInt64, replicate::Int = 1) =
-    sample_leaves(_single_root(population), n; seed = seed, replicate = replicate)
+sample_leaves(population::Population, n::Integer; seed::Integer, replicate::Integer = 1) =
+    sample_leaves(_sampling_root(population), n; seed = seed, replicate = replicate)
 
 # The unique root of a population, or an `ArgumentError` naming why there is none.
-function _single_root(population::Population)
+function _sampling_root(population::Population)
     roots = _population_roots(population)
     isempty(roots) && throw(ArgumentError("population has no cells to sample from"))
     length(roots) == 1 || throw(ArgumentError(
@@ -170,19 +167,9 @@ What [`sample_trees`](@ref) should produce from one finished tree.
 - `retain_full` — whether the returned [`SampledTrees`](@ref) carries the full
   tree.
 
-!!! note "`retain_full = false` does not free memory by itself"
-    It controls only what the returned bundle holds. It cannot release the
-    caller's own reference to the tree, and it cannot release the tree reachable
-    from a `Population` — every alive leaf holds a `parent` chain back to the
-    founder, so while the population is alive the whole tree is alive. To
-    actually bound memory across a sweep, drop both yourself:
-
-    ```julia
-    out = sample_trees(pop, SamplingSpec(sizes = [1000], retain_full = false);
-                       seed = myseed)
-    pop = nothing
-    GC.gc()
-    ```
+`retain_full = false` only controls what the returned bundle holds: while the
+`Population` is alive, its whole tree is too. See the manual's *Sampling* page for
+bounding memory across a sweep.
 """
 struct SamplingSpec
     sizes::Vector{Int}
@@ -255,7 +242,7 @@ deliberately not part of `NonMarkovBlock` or `MeasurementSpec`, both of which
 describe things that happen *during* `simulate!`.
 """
 function sample_trees(root::BinaryNode{NonMarkovCell}, spec::SamplingSpec;
-                      seed::UInt64)
+                      seed::Integer)
     leaves = _leaves(root)
     N_full = length(leaves)
     for n in spec.sizes
@@ -265,10 +252,10 @@ function sample_trees(root::BinaryNode{NonMarkovCell}, spec::SamplingSpec;
 
     samples = LeafSample[]
     for n in spec.sizes, r in 1:spec.replicates
-        push!(samples, _sample_leaves(root, leaves, n, _draw_seed(seed, n, r), r))
+        push!(samples, _sample_leaves(root, leaves, n, _draw_seed(UInt64(seed), n, r), r))
     end
     return SampledTrees(spec.retain_full ? root : nothing, samples)
 end
 
-sample_trees(population::Population, spec::SamplingSpec; seed::UInt64) =
-    sample_trees(_single_root(population), spec; seed = seed)
+sample_trees(population::Population, spec::SamplingSpec; seed::Integer) =
+    sample_trees(_sampling_root(population), spec; seed = seed)

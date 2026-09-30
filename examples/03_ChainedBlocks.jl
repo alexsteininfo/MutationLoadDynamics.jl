@@ -10,7 +10,7 @@
 ## across both calls; `AtEnd` fires at the end of each.
 ##
 ## Inputs : none.  Outputs: summary statistics printed to stdout.
-## Run    : julia --project=. examples/ChainedBlocks.jl
+## Run    : julia --project=. examples/03_ChainedBlocks.jl
 ##
 
 using MutationLoadDynamics
@@ -46,11 +46,11 @@ m = finalize_measurements(acc)
 for (phase, snap) in zip(("Phase 1: drivers, ν = 1.0", "Phase 2: selection only, ν = 0"),
                          m.snapshots)
     println("=== ", phase, " ===")
-    println("Population size : ", length(snap.fitness_distribution))
+    println("Population size : ", length(snap[:fitness]))
     println("Simulation time : ", round(snap.t, digits = 2))
-    println("Mean fitness    : ", round(mean(snap.fitness_distribution), digits = 4))
-    println("Std fitness     : ", round(std(snap.fitness_distribution),  digits = 4))
-    println("Mean drivers    : ", round(mean(snap.drivers_per_cell), digits = 2))
+    println("Mean fitness    : ", round(mean(snap[:fitness]), digits = 4))
+    println("Std fitness     : ", round(std(snap[:fitness]),  digits = 4))
+    println("Mean drivers    : ", round(mean(snap[:drivers]), digits = 2))
     println()
 end
 println("Trajectory points over both phases: ", length(m.trajectory))

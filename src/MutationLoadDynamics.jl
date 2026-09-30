@@ -1,9 +1,14 @@
+"""
+    MutationLoadDynamics
+
+Forward simulation of a somatic cell population under non-Markovian birth–death
+dynamics, with per-cell fitness and the complete lineage tree of the survivors.
+"""
 module MutationLoadDynamics
 
 using Distributions
 using Statistics
 using Random
-using StatsBase
 using AbstractTrees
 using DataStructures: BinaryMinHeap
 using StableRNGs: StableRNG
@@ -12,45 +17,45 @@ export
 # Block
 NonMarkovBlock,
 
-# Cell and tree types
+# Cells, trees and the population
 NonMarkovCell,
 BinaryNode,
+Population,
 set_fitness!,
 
-# Population
-Population,
-
-# Simulation entry point
+# Simulation
 simulate!,
 initialize_population,
 reset_schedule!,
+has_pending_schedule,
 
 # Tree utilities
-allcells,
-getalivecells,
+alive_cells,
 popsize,
-getsingleroot,
-findMRCA,
-leftchild!,
-rightchild!,
-endtime,
-celllifetime,
-celllifetimes,
-age,
+roots,
+single_root,
+find_mrca,
+left_child!,
+right_child!,
+division_time,
+cell_lifetime,
+cell_lifetimes,
+last_division_time,
 
 # Statistics
-pairwisedistance,
-pairwisedistances,
-pairwise_differences,
-average_mutations,
-mutations_per_cell,
-clonal_mutations,
-coalescence_times,
-sitefrequencyspectrum,
-leaf_depths,
-branch_spectrum,
-filtered_mutations_per_cell,
+drivers_per_cell,
+clonal_drivers,
+mean_drivers,
+var_drivers,
+fitness_per_cell,
 leaf_fitness,
+filtered_drivers_per_cell,
+pairwise_distance,
+pairwise_distances,
+coalescence_times,
+site_frequency_spectrum,
+branch_spectrum,
+leaf_depths,
 
 # Sampling
 LeafSample,
@@ -58,11 +63,6 @@ sample_leaves,
 SamplingSpec,
 SampledTrees,
 sample_trees,
-
-fitness_per_cell,
-fitness_distribution,
-mean_k,
-var_k,
 
 # Measurements
 MeasurementSpec,
@@ -78,7 +78,9 @@ AtPopSize,
 AbstractStatistic,
 SFS,
 FitnessDistribution,
-DriversPerCell
+DriversPerCell,
+measure,
+statistic_name
 
 include("types.jl")
 include("blocks.jl")

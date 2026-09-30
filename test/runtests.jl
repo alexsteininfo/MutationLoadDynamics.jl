@@ -1,7 +1,6 @@
 using MutationLoadDynamics
 using Test
 using Random
-using StatsBase
 using AbstractTrees
 using Distributions
 using Statistics

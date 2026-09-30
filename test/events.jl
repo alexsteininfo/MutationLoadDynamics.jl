@@ -1,8 +1,8 @@
 @testset "CellEvent ordering" begin
     pop  = initialize_population(fitness_init = 1.0)
     node = first(values(pop.cells))
-    e1 = MutationLoadDynamics.CellEvent(0.5, node, :birth)
-    e2 = MutationLoadDynamics.CellEvent(1.5, node, :death)
+    e1 = MutationLoadDynamics.CellEvent(0.5, node, true)
+    e2 = MutationLoadDynamics.CellEvent(1.5, node, false)
     @test e1 < e2
     @test !(e2 < e1)
 end
@@ -26,7 +26,6 @@ end
     while !isempty(heap)
         e = pop!(heap)
         @test e.time >= node.data.birthtime
-        @test e.event_type in (:birth, :death)
     end
 end
 
@@ -48,7 +47,7 @@ end
         heap = DataStructures.BinaryMinHeap{MutationLoadDynamics.CellEvent}()
         MutationLoadDynamics.schedule_cell!(heap, node, block, rng)
         e = pop!(heap)
-        e.event_type == :birth ? (n_birth += 1) : (n_death += 1)
+        e.is_division ? (n_birth += 1) : (n_death += 1)
     end
     @test n_birth > 450   # roughly 99% should be births
 end

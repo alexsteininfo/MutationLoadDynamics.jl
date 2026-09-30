@@ -37,7 +37,7 @@ end
         @test popsize(chained) == popsize(single)
         @test chained._next_id == single._next_id
         @test sort(fitness_per_cell(chained))   == sort(fitness_per_cell(single))
-        @test sort(mutations_per_cell(chained)) == sort(mutations_per_cell(single))
+        @test sort(drivers_per_cell(chained)) == sort(drivers_per_cell(single))
     end
 end
 
@@ -86,15 +86,15 @@ end
     # (an event time is always its cell's birthtime plus a positive draw), so this is a
     # sanity check rather than the test that catches the chaining bug — that one is
     # "time never runs backwards" above.
-    root = getsingleroot(allcells(pop))
+    root = single_root(pop)
     @test !isnothing(root)
     for node in PreOrderDFS(root)
         if !isnothing(node.parent)
             @test node.data.birthtime >= node.parent.data.birthtime
         end
-        @test celllifetime(node) >= 0.0
+        @test cell_lifetime(node, pop.t) >= 0.0
     end
-    @test all(c.data.birthtime <= pop.t for c in allcells(pop))
+    @test all(c.data.birthtime <= pop.t for c in alive_cells(pop))
 end
 
 @testset "a fresh accumulator on a chained call does not back-fill from t=0" begin
@@ -141,8 +141,8 @@ end
     rng = MersenneTwister(5772)
     pop = initialize_population(fitness_init = 1.0)
     simulate!(pop, chain_block(Nmax = 60), rng)
-    @test !isnothing(pop._pending)
-    @test length(pop._pending) == popsize(pop)
+    @test has_pending_schedule(pop)
+    @test length(pop._pending) == popsize(pop)      # one event per cell
 
     # Removing a cell by hand desynchronises the queue and must be caught, not silently
     # simulated with a stale event pointing at a dead node.
@@ -152,20 +152,14 @@ end
 
     # reset_schedule! is the documented recovery.
     @test reset_schedule!(pop) === pop
-    @test isnothing(pop._pending)
+    @test !has_pending_schedule(pop)
     simulate!(pop, chain_block(Nmax = 120), rng)
     @test popsize(pop) >= 120
 end
 
 @testset "a fresh population carries no queue until it is simulated" begin
-    pop = initialize_population(fitness_init = 1.0)
-    @test isnothing(pop._pending)
-    @test isnothing(initialize_population(5)._pending)
-    # The pre-existing three-argument positional constructor still works.
-    cells = Dict{Int64, BinaryNode{NonMarkovCell}}(1 => rootnode(1, 0.0, 0))
-    manual = Population(cells, 0.0, 1)
-    @test isnothing(manual._pending)
-    @test popsize(manual) == 1
+    @test !has_pending_schedule(initialize_population())
+    @test !has_pending_schedule(initialize_population(5))
 end
 
 # ── Fresh schedules are conditioned on each cell's age ────────────────────────

@@ -25,5 +25,5 @@ function initialize_population(N::Int; fitness_init::Real = 1.0, time::Real = 0.
     for id in 1:N
         cells[id] = BinaryNode(NonMarkovCell(id, time, 0, 0, fitness_init))
     end
-    return Population(cells, Float64(time), N)
+    return Population(cells, Float64(time), N, nothing)
 end

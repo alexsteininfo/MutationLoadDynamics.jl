@@ -1,46 +1,34 @@
 """
     simulate!(population, block, rng; accumulator = nothing) -> Population
 
-Run a non-Markovian birth-death simulation on `population` using `block` parameters.
-Each living cell pre-schedules its next event (division or death) at birth by drawing
-from competing waiting-time distributions — the earlier of the two fires. A global
-min-heap orders events so the globally earliest one is always processed next.
+Advance `population` under `block` until `block.stopfunction` returns `true`, the clock
+reaches `block.tmax`, or the population dies out (and is not restarted). Mutates
+`population` in place and returns it, so blocks can be chained.
 
-Returns `population` (mutated in place) so blocks can be chained.
+Every living cell has exactly one pending event — its division or its death, whichever
+of its two waiting times is shorter — and events fire in global time order.
 
-# Chaining
+- **Chaining.** The queue of already-drawn events is carried on the population and
+  reused, so a chained run is identical draw for draw to the equivalent uninterrupted
+  one. Carried events keep the previous block's timing; call [`reset_schedule!`](@ref)
+  to redraw every cell under the new block.
+- **Fresh schedules** (a new population, after `reset_schedule!`, after an extinction
+  restart) visit cells in id order, and draw each cell's next event conditioned on
+  nothing having happened to it before the current time. This is exact.
+- **Recording.** Pass a [`MeasurementAccumulator`](@ref) to record trajectories and
+  snapshots.
 
-Calling `simulate!` again on the same `population` continues the same lineage tree.
-The queue of already-drawn, not-yet-fired events is carried on `population._pending`
-and reused, so a chained run is identical draw for draw to the equivalent uninterrupted
-one. A carried event was drawn under the *previous* block's `birth_dist`/`death_dist`;
-call [`reset_schedule!`](@ref) first to redraw every cell under the new block instead.
-
-# Fresh schedules
-
-Whenever there is no carried queue — a new population, after `reset_schedule!`, or
-after an extinction restart — every alive cell is scheduled in id order, conditioned
-on its current age: its next event is drawn from the law of `(T_div, T_die)` given that
-neither happened before `population.t`
-(see [`schedule_cell!`](@ref MutationLoadDynamics.schedule_cell!)). This is exact, so
-restarts and redrawn schedules are also correct on chained, aged populations.
-
-The rng defaults to `Random.default_rng()`; pass your own for reproducible runs.
+The rng is required: pass a seeded one (`MersenneTwister(seed)`, or a `StableRNG`) so
+the run is reproducible.
 """
 function simulate!(
     population::Population,
     block::NonMarkovBlock,
-    rng::AbstractRNG = Random.default_rng();
+    rng::AbstractRNG;
     accumulator::Union{MeasurementAccumulator, Nothing} = nothing,
 )
-    if block.restart_on_extinction
-        # A deepcopy reaches the whole tree through `parent` links, so this is cheap only
-        # while the population is small — typically on a first block.
-        initial_cells  = deepcopy(population.cells)
-        initial_t      = population.t
-        initial_nextid = population._next_id
-    end
-    drivers = Poisson(block.ν)
+    snapshot = block.restart_on_extinction ? _RestartPoint(population) : nothing
+    drivers  = Poisson(block.ν)
 
     if !isnothing(accumulator)
         _start_call!(accumulator, population)
@@ -51,8 +39,8 @@ function simulate!(
         heap = population._pending
         if isnothing(heap)
             heap = BinaryMinHeap{CellEvent}()
-            for id in sort!(collect(keys(population.cells)))
-                schedule_cell!(heap, population.cells[id], block, rng, population.t)
+            for node in _sorted_cells(population)
+                schedule_cell!(heap, node, block, rng, population.t)
             end
         elseif length(heap) != popsize(population)
             throw(ArgumentError(
@@ -67,6 +55,11 @@ function simulate!(
         isnothing(accumulator) || _check_popsize_triggers!(accumulator, population)
 
         while !block.stopfunction(population) && !isempty(heap)
+            if first(heap).time > block.tmax
+                # Stop exactly at tmax; the next event stays queued for a chained call.
+                population.t = max(population.t, block.tmax)
+                break
+            end
             event = pop!(heap)
             event.time >= population.t || error(
                 "event at t = $(event.time) precedes the current time t = " *
@@ -76,7 +69,7 @@ function simulate!(
             isnothing(accumulator) || _record_until!(accumulator, population, event.time)
             population.t = event.time
 
-            if event.event_type == :birth
+            if event.is_division
                 d1, d2 = celldivision!(population, event.node, event.time, block,
                                        drivers, rng)
                 # Must run before scheduling: schedule_cell! reads the fitness at push
@@ -93,12 +86,7 @@ function simulate!(
         end
 
         if popsize(population) == 0 && block.restart_on_extinction
-            population.cells    = deepcopy(initial_cells)
-            population.t        = initial_t
-            population._next_id = initial_nextid
-            # deepcopy produces fresh BinaryNodes, so any carried events point at
-            # orphaned nodes — drop the queue and redraw for the restored cells.
-            population._pending = nothing
+            _restore!(population, snapshot)
             isnothing(accumulator) || _rollback!(accumulator, checkpoint)
             isnothing(block.on_restart) || block.on_restart(population)
         else
@@ -113,18 +101,64 @@ end
 """
     reset_schedule!(population) -> Population
 
-Discard the queue of pending, already-drawn events carried on `population`, so that the
-next `simulate!` call redraws every alive cell's next event from scratch.
+Discard the queue of already-drawn events carried on `population`, so that the next
+`simulate!` call redraws every living cell's next event under its block. The redraw is
+conditioned on each cell's current age, so it is exact.
 
-This is the escape hatch from the event-carrying behaviour described under [`simulate!`](@ref).
-It is also how to recover after adding or removing cells in `population.cells` by hand,
-which otherwise leaves the queue inconsistent with the population and raises an error.
-
-The redraw conditions each cell on the age it has already reached (see
-[`simulate!`](@ref)), so it is exact; the only change is that every cell's next event
-now follows the distributions of the block passed to the next `simulate!` call.
+Also the recovery after adding or removing cells in `population.cells` by hand, which
+otherwise leaves the queue inconsistent and makes `simulate!` throw.
 """
 function reset_schedule!(population::Population)
+    population._pending = nothing
+    return population
+end
+
+# ── Extinction restarts ───────────────────────────────────────────────────────
+#
+# Instead of deep-copying the tree, record what a call can change: the starting cells'
+# data, and every parent–child link on their ancestry (which `prune_tree!` may cut when a
+# lineage dies). Restoring re-links those same node objects and drops everything born
+# since, so the cost is the number of ancestors, with no allocation of nodes.
+
+struct _RestartPoint
+    cells::Dict{Int64, BinaryNode{NonMarkovCell}}
+    data::Vector{Tuple{BinaryNode{NonMarkovCell}, NonMarkovCell}}
+    links::Vector{Tuple{BinaryNode{NonMarkovCell}, BinaryNode{NonMarkovCell}, Bool}}
+    t::Float64
+    next_id::Int64
+end
+
+function _RestartPoint(population::Population)
+    data  = [(node, node.data) for node in values(population.cells)]
+    links = Tuple{BinaryNode{NonMarkovCell}, BinaryNode{NonMarkovCell}, Bool}[]
+    # A pruned tree holds nothing but the living cells' ancestry, so one pre-order pass
+    # per root lists exactly the links a failed attempt can cut.
+    for root in _population_roots(population)
+        nodes, parent = _preorder(root)
+        for i in eachindex(nodes)
+            parent[i] == 0 && continue
+            p = nodes[parent[i]]
+            push!(links, (nodes[i], p, p.left === nodes[i]))
+        end
+    end
+    return _RestartPoint(copy(population.cells), data, links, population.t,
+                         population._next_id)
+end
+
+function _restore!(population::Population, point::_RestartPoint)
+    for (node, data) in point.data
+        node.data  = data
+        node.left  = nothing       # drop everything born during the failed attempt
+        node.right = nothing
+    end
+    for (child, parent, isleft) in point.links
+        child.parent = parent
+        isleft ? (parent.left = child) : (parent.right = child)
+    end
+    population.cells    = copy(point.cells)
+    population.t        = point.t
+    population._next_id = point.next_id
+    # The carried events point at the failed attempt's cells: redraw for the restored ones.
     population._pending = nothing
     return population
 end

@@ -4,10 +4,11 @@
 # event queue), so that no refactor perturbs the random stream by a single draw: stored
 # simulation results must stay reproducible from their seeds.
 #
-# The literals were captured on Julia 1.12.1 with Distributions 0.25. They depend on the
-# Julia RNG and the Gamma/Poisson/Exponential samplers, so a Julia or Distributions
-# upgrade may legitimately change them (regenerate deliberately in that case); no edit
-# to this package should. The stream differs on Julia 1.10, so the exact values are
+# The literals were captured on Julia 1.12.1 with Distributions 0.25.131, and still pass
+# on Julia 1.12.7 with Distributions 0.25.130. They depend on the Julia RNG and the
+# Gamma/Poisson/Exponential samplers, so a Julia or Distributions upgrade may
+# legitimately change them (regenerate deliberately in that case); no edit to this
+# package should. The stream differs on Julia 1.10, so the exact values are
 # asserted on Julia >= 1.11 only.
 
 @testset "golden: neutral configuration (Gamma k=5, d=0.5, ν=2.0, Dirac drivers)" begin
@@ -28,8 +29,8 @@
     @test all(f === 1.0 for f in fitness_per_cell(pop))
     if VERSION >= v"1.11"
         @test pop.t === 7.107669723464197
-        @test sum(mutations_per_cell(pop)) == 1810
-        @test sort(mutations_per_cell(pop)) == [
+        @test sum(drivers_per_cell(pop)) == 1810
+        @test sort(drivers_per_cell(pop)) == [
             8, 11, 11, 11, 11, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 14, 14, 14,
             14, 14, 15, 15, 15, 15, 15, 15, 15, 15, 16, 16, 16, 16, 16, 16, 16, 16, 17, 17,
             17, 17, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
@@ -37,8 +38,8 @@
             22, 23, 23, 23, 23, 23, 24, 24, 24, 25, 25, 25, 25, 25, 27, 27, 28, 29, 29, 29]
     else
         @test_skip pop.t === 7.107669723464197
-        @test_skip sum(mutations_per_cell(pop)) == 1810
-        @test_skip sort(mutations_per_cell(pop)) == [
+        @test_skip sum(drivers_per_cell(pop)) == 1810
+        @test_skip sort(drivers_per_cell(pop)) == [
             8, 11, 11, 11, 11, 12, 12, 12, 12, 12, 13, 13, 13, 13, 13, 13, 13, 14, 14, 14,
             14, 14, 15, 15, 15, 15, 15, 15, 15, 15, 16, 16, 16, 16, 16, 16, 16, 16, 17, 17,
             17, 17, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
@@ -94,11 +95,11 @@ end
         1.3747103628822632, 1.4052596476891026, 1.4825800163278604, 1.5009707683942342]
     if VERSION >= v"1.11"
         @test pop.t === 6.4000753169971
-        @test sum(mutations_per_cell(pop)) == 388
+        @test sum(drivers_per_cell(pop)) == 388
         @test fits == expected_fits
     else
         @test_skip pop.t === 6.4000753169971
-        @test_skip sum(mutations_per_cell(pop)) == 388
+        @test_skip sum(drivers_per_cell(pop)) == 388
         @test_skip fits == expected_fits
     end
 end
@@ -125,5 +126,5 @@ end
     a, b = _run(hooks = false), _run(hooks = true)
     @test a.t === b.t
     @test popsize(a) == popsize(b)
-    @test sort(mutations_per_cell(a)) == sort(mutations_per_cell(b))
+    @test sort(drivers_per_cell(a)) == sort(drivers_per_cell(b))
 end

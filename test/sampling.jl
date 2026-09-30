@@ -35,7 +35,7 @@ end
     end
     pop = simple_sampling_pop(Nmax = 120)
     @test sample_leaves(pop, 30; seed = UInt64(99)).sampled_ids ==
-          reference_draw(getsingleroot(allcells(pop)), 30, UInt64(99))
+          reference_draw(single_root(pop), 30, UInt64(99))
 end
 
 @testset "GOLDEN LITERALS: frozen draw output and seed derivation" begin
@@ -55,9 +55,9 @@ end
     root = sampling_fixture()
     s = sample_leaves(root, 3; seed = UInt64(1))
     @test sort(s.sampled_ids) == [3, 4, 5]
-    @test mutations_per_cell(s.root) == mutations_per_cell(root)
+    @test drivers_per_cell(s.root) == drivers_per_cell(root)
     @test leaf_depths(s.root)        == leaf_depths(root)
-    @test sitefrequencyspectrum(s.root, 3) == sitefrequencyspectrum(root, 3)
+    @test site_frequency_spectrum(s.root, 3) == site_frequency_spectrum(root, 3)
     @test [l.data.id for l in Leaves(s.root)] == [l.data.id for l in Leaves(root)]
 end
 
@@ -97,7 +97,7 @@ end
     # away, a sampled cell's depth would shrink and its burden would lose the
     # mutations on the collapsed edges.
     pop    = simple_sampling_pop(Nmax = 200)
-    root   = getsingleroot(allcells(pop))
+    root   = single_root(pop)
     burden = id_burden_map(root)
     depth  = id_depth_map(root)
 
@@ -181,7 +181,7 @@ end
 
 @testset "parent links are consistent" begin
     pop  = simple_sampling_pop(Nmax = 80)
-    root = getsingleroot(allcells(pop))
+    root = single_root(pop)
     s = sample_leaves(root, 20; seed = UInt64(9))
     @test isnothing(s.root.parent)
     for node in PreOrderDFS(s.root)
@@ -192,13 +192,13 @@ end
 
 @testset "the source tree is never mutated" begin
     root   = sampling_fixture()
-    before = (mutations_per_cell(root), leaf_depths(root),
-              sitefrequencyspectrum(root, 3), [l.data.id for l in Leaves(root)])
+    before = (drivers_per_cell(root), leaf_depths(root),
+              site_frequency_spectrum(root, 3), [l.data.id for l in Leaves(root)])
     sample_leaves(root, 1; seed = UInt64(3))
     sample_leaves(root, 2; seed = UInt64(4))
     sample_leaves(root, 3; seed = UInt64(5))
-    @test (mutations_per_cell(root), leaf_depths(root),
-           sitefrequencyspectrum(root, 3),
+    @test (drivers_per_cell(root), leaf_depths(root),
+           site_frequency_spectrum(root, 3),
            [l.data.id for l in Leaves(root)]) == before
 end
 
@@ -222,11 +222,11 @@ end
 
 @testset "SFS of a sample sums to the sample's total burden" begin
     pop  = simple_sampling_pop(Nmax = 150)
-    root = getsingleroot(allcells(pop))
+    root = single_root(pop)
     for n in (1, 10, 150)
         s   = sample_leaves(root, n; seed = UInt64(100 + n))
-        sfs = sitefrequencyspectrum(s.root, n)
-        @test sum(k * sfs[k] for k in 1:n) == sum(mutations_per_cell(s.root; includeclonal = true))
+        sfs = site_frequency_spectrum(s.root, n)
+        @test sum(k * sfs[k] for k in 1:n) == sum(drivers_per_cell(s.root; includeclonal = true))
     end
 end
 
@@ -324,11 +324,11 @@ end
     # n = N_full is the whole population: every statistic must match exactly.
     whole = out.samples[1]
     @test whole.n == popsize(pop)
-    @test sort(mutations_per_cell(whole.root)) == sort(mutations_per_cell(pop))
-    @test sitefrequencyspectrum(whole.root, popsize(pop)) ==
-          sitefrequencyspectrum(pop)
+    @test sort(drivers_per_cell(whole.root)) == sort(drivers_per_cell(pop))
+    @test site_frequency_spectrum(whole.root, popsize(pop)) ==
+          site_frequency_spectrum(pop)
     @test sort(leaf_depths(whole.root)) ==
-          sort(leaf_depths(getsingleroot(allcells(pop))))
+          sort(leaf_depths(single_root(pop)))
 end
 
 @testset "END TO END: sampling a tree that death has pruned" begin
@@ -346,7 +346,7 @@ end
     pop = initialize_population(fitness_init = 1.0)
     simulate!(pop, block, MersenneTwister(7))
 
-    root   = getsingleroot(allcells(pop))
+    root   = single_root(pop)
     burden = id_burden_map(root)
     s = sample_leaves(root, 20; seed = UInt64(31))
 
@@ -360,7 +360,7 @@ end
 end
 
 @testset "sampling a forest is rejected by name" begin
-    # Two independent founders: getsingleroot returns nothing, and both the
+    # Two independent founders: single_root returns nothing, and both the
     # single-draw and the spec-driven entry points must say so rather than
     # silently sampling one tree of the forest.
     pop = initialize_population(fitness_init = 1.0)
@@ -374,4 +374,12 @@ end
     @test occursin("2 independent roots", err.msg)
     err_trees = try sample_trees(pop, SamplingSpec(1); seed = UInt64(1)) catch e; e end
     @test occursin("2 independent roots", err_trees.msg)
+end
+
+@testset "integer seeds are accepted and equal the UInt64 seed" begin
+    root = sampling_fixture()
+    @test sample_leaves(root, 2; seed = 42).sampled_ids ==
+          sample_leaves(root, 2; seed = UInt64(42)).sampled_ids
+    @test sample_trees(root, SamplingSpec(2); seed = 5).samples[1].seed ==
+          sample_trees(root, SamplingSpec(2); seed = UInt64(5)).samples[1].seed
 end

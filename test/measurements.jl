@@ -38,7 +38,7 @@ end
     simulate!(initialize_population(), clock_block(8), MersenneTwister(1); accumulator = acc)
     snaps = finalize_measurements(acc).snapshots
     @test [s.t for s in snaps] == [0.0, 1.5]            # AtTime(9.0) is never reached
-    @test [length(s.fitness_distribution) for s in snaps] == [1, 2]
+    @test [length(s[:fitness]) for s in snaps] == [1, 2]
 end
 
 @testset "AtPopSize is checked before the first event" begin
@@ -48,7 +48,7 @@ end
     snaps = finalize_measurements(acc).snapshots
     @test length(snaps) == 1
     @test snaps[1].t == 0.0
-    @test length(snaps[1].fitness_distribution) == 5
+    @test length(snaps[1][:fitness]) == 5
 end
 
 @testset "trajectory statistics match a direct computation" begin
@@ -60,9 +60,10 @@ end
     m    = finalize_measurements(acc)
     last_pt, endsnap = m.trajectory[end], only(m.snapshots)
     if last_pt.t == pop.t           # only then is the last point the final state
-        @test last_pt.mean_fitness ≈ mean(endsnap.fitness_distribution)
+        @test last_pt.mean_fitness ≈ mean(endsnap[:fitness])
     end
-    @test endsnap.drivers_per_cell == mutations_per_cell(pop)
+    @test endsnap[:drivers] == drivers_per_cell(pop)
+    @test endsnap[:fitness] == fitness_per_cell(pop)     # co-indexed by id
     @test all(p -> p.N_total >= 1, m.trajectory)
     @test issorted([p.t for p in m.trajectory])
 end
@@ -95,4 +96,42 @@ end
         snapshot_triggers = [AtTime(0.5), AtTime(2.5)]))
     simulate!(pop, clock_block(16), MersenneTwister(1); accumulator = acc)
     @test [s.t for s in finalize_measurements(acc).snapshots] == [2.5]
+end
+
+# User-defined statistics must be declared at top level (a struct cannot be defined
+# inside a testset).
+struct MeanFitnessStat <: AbstractStatistic end
+MutationLoadDynamics.measure(::MeanFitnessStat, pop) = mean(fitness_per_cell(pop))
+MutationLoadDynamics.statistic_name(::MeanFitnessStat) = :mean_fitness
+struct UnnamedStat <: AbstractStatistic end
+MutationLoadDynamics.measure(::UnnamedStat, pop) = popsize(pop)
+struct NoMeasureStat <: AbstractStatistic end
+
+@testset "user-defined snapshot statistics" begin
+    spec = MeasurementSpec(snapshot_triggers = [AtEnd()],
+                           snapshot_stats = [MeanFitnessStat(), UnnamedStat(), SFS()])
+    acc  = MeasurementAccumulator(spec)
+    pop  = initialize_population()
+    simulate!(pop, clock_block(8), MersenneTwister(1); accumulator = acc)
+    snap = only(finalize_measurements(acc).snapshots)
+    @test snap[:mean_fitness] == 1.0
+    @test snap[:UnnamedStat] == 8
+    @test snap[:sfs] == site_frequency_spectrum(pop)
+    @test Set(keys(snap)) == Set([:mean_fitness, :UnnamedStat, :sfs])
+    @test !haskey(snap, :fitness)
+
+    @test_throws ArgumentError MeasurementSpec(snapshot_stats = [NoMeasureStat()])
+    @test_throws ArgumentError MeasurementSpec(snapshot_stats = [SFS(), SFS()])
+end
+
+@testset "tmax: trajectory and AtTime reach exactly tmax" begin
+    block = NonMarkovBlock(birth_dist = f -> Dirac(1.0), death_dist = f -> Dirac(Inf),
+        driver_dist = Dirac(0.0), fitness_update = (f, δ) -> f, ν = 0.0, tmax = 2.5)
+    acc = MeasurementAccumulator(MeasurementSpec(trajectory_dt = 0.5,
+                                                 snapshot_triggers = [AtTime(2.5), AtEnd()]))
+    simulate!(initialize_population(), block, MersenneTwister(1); accumulator = acc)
+    m = finalize_measurements(acc)
+    @test last(m.trajectory).t == 2.5
+    @test [p.N_total for p in m.trajectory] == [1, 1, 2, 2, 4, 4]
+    @test [s.t for s in m.snapshots] == [2.5, 2.5]
 end

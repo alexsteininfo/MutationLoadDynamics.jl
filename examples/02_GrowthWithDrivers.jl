@@ -6,7 +6,7 @@
 ## end. Shows the MeasurementSpec → MeasurementAccumulator → finalize_measurements flow.
 ##
 ## Inputs : none.  Outputs: summary statistics printed to stdout.
-## Run    : julia --project=. examples/GrowthWithDrivers.jl
+## Run    : julia --project=. examples/02_GrowthWithDrivers.jl
 ##
 
 using MutationLoadDynamics
@@ -43,8 +43,8 @@ println("Simulation time       : ", round(pop.t, digits = 2))
 println("Trajectory points     : ", length(m.trajectory))
 for snap in m.snapshots
     println("\nSnapshot ", snap.trigger, " at t = ", round(snap.t, digits = 2))
-    println("  cells              : ", length(snap.fitness_distribution))
-    println("  mean fitness       : ", round(mean(snap.fitness_distribution), digits = 4))
-    println("  mean drivers/cell  : ", round(mean(snap.drivers_per_cell), digits = 2))
-    println("  SFS classes > 0    : ", count(>(0), snap.sfs))
+    println("  cells              : ", length(snap[:fitness]))
+    println("  mean fitness       : ", round(mean(snap[:fitness]), digits = 4))
+    println("  mean drivers/cell  : ", round(mean(snap[:drivers]), digits = 2))
+    println("  SFS classes > 0    : ", count(>(0), snap[:sfs]))
 end

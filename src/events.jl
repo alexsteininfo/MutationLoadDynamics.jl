@@ -31,11 +31,9 @@ function schedule_cell!(
         t_div = t0 + rand(rng, block.birth_dist(f))
         t_die = t0 + rand(rng, block.death_dist(f))
         if min(t_div, t_die) >= tmin
-            if t_div <= t_die
-                push!(heap, CellEvent(t_div, node, :birth))
-            else
-                push!(heap, CellEvent(t_die, node, :death))
-            end
+            # A tie goes to division.
+            push!(heap, t_div <= t_die ? CellEvent(t_div, node, true) :
+                                         CellEvent(t_die, node, false))
             return nothing
         end
     end

@@ -1,32 +1,27 @@
 # Sampling
 
-Real experiments sequence a few hundred or a few thousand cells out of a population of
-millions. A simulated observable is only comparable to data once it has been through the
-same bottleneck, so sampling is a first-class operation here rather than an afterthought.
+Experiments sequence a few hundred or thousand cells out of millions. A simulated
+observable is comparable to data only after the same bottleneck, so sampling is a
+first-class operation. It is **post-hoc**: it applies to a finished tree, and is
+deliberately not part of [`NonMarkovBlock`](@ref) or [`MeasurementSpec`](@ref).
 
-```julia
-out = sample_trees(pop, SamplingSpec([1000, 100]); seed = UInt64(0xBEEF))
+```@example sampling
+using MutationLoadDynamics, Distributions, Random, Statistics
+block = NonMarkovBlock(
+    birth_dist = f -> Gamma(5.0, 1 / (5 * f)), death_dist = f -> Exponential(4.0),
+    driver_dist = Exponential(0.05), fitness_update = (f, δ) -> f + δ, ν = 0.5,
+    stopfunction = pop -> popsize(pop) >= 2_000, restart_on_extinction = true)
+pop = simulate!(initialize_population(), block, MersenneTwister(5))
 
-out.full                              # the whole tree, still there
-s = out.samples[1]                    # a LeafSample: n = 1000
-sitefrequencyspectrum(s.root, s.n)    # the sample's SFS
-mutations_per_cell(s.root; includeclonal = true)   # each sampled cell's FULL-TREE burden
-leaf_depths(s.root)                   # each sampled cell's FULL-TREE depth
+out = sample_trees(pop, SamplingSpec([200, 20]); seed = 20260930)
+s   = out.samples[1]                                # a LeafSample with n = 200
+(s.n, s.N_full, length(site_frequency_spectrum(s.root, s.n)))
 ```
-
-Sampling is **post-hoc**: it applies to a tree that has finished growing. It is
-deliberately not a field of [`NonMarkovBlock`](@ref) or [`MeasurementSpec`](@ref), both of
-which describe things that happen *during* `simulate!`.
 
 ## One draw
 
-```julia
-s = sample_leaves(root, n; seed = UInt64(1))
-s = sample_leaves(pop,  n; seed = UInt64(1), replicate = 2)
-```
-
-[`sample_leaves`](@ref) draws `n` of the tree's leaves uniformly without replacement and
-returns the induced tree as a [`LeafSample`](@ref):
+[`sample_leaves`](@ref)`(root_or_pop, n; seed, replicate = 1)` draws `n` leaves uniformly
+without replacement and returns the induced tree as a [`LeafSample`](@ref):
 
 | Field | Contents |
 |:---|:---|
@@ -37,52 +32,41 @@ returns the induced tree as a [`LeafSample`](@ref):
 | `replicate` | which independent draw at this `(tree, n)` this is |
 | `sampled_ids` | `NonMarkovCell.id` of each drawn cell, in draw order |
 
-It is **non-destructive** — the source tree is untouched, because the same tree is
-normally drawn from again at other sizes. Cost is one pass over the source tree's leaves
-plus the number of retained nodes; [`sample_trees`](@ref) lists the leaves once for all
-its draws.
+It is non-destructive, so the same tree can be drawn from again at other sizes. It costs
+one pass over the source tree's leaves plus the retained nodes; [`sample_trees`](@ref)
+lists the leaves once for all its draws.
 
 ## Prune, do not collapse
 
 The induced tree keeps the sampled leaves **plus every ancestor of a sampled leaf**, and
-retains the resulting unary nodes rather than merging them into their children.
+keeps the resulting unary nodes. Every division ancestral to a sampled cell is still a
+node, so a sampled cell's root-to-leaf path is unchanged:
+[`drivers_per_cell`](@ref)`(s.root; includeclonal = true)` and [`leaf_depths`](@ref)
+return exactly that cell's **full-tree** burden and depth. Collapsing would turn depth
+into a count of bifurcations that happened to survive sampling — a property of the
+sample, not of the cell. It is also the shape [`prune_tree!`](@ref
+MutationLoadDynamics.prune_tree!) leaves when a lineage dies out, so every statistic
+applies to a sampled tree unchanged.
 
-This is the central decision of the module. Because every division ancestral to a sampled
-cell is still a node, a sampled cell's root-to-leaf path is unchanged — so
-[`mutations_per_cell`](@ref)`(s.root; includeclonal = true)` and [`leaf_depths`](@ref) on
-the sampled tree return exactly
-that cell's **full-tree** burden and divisional depth. Collapsing would turn depth into a
-count of bifurcations that happened to survive sampling, which is a property of the
-sample rather than of the cell.
-
-It is also exactly the shape [`prune_tree!`](@ref MutationLoadDynamics.prune_tree!)
-already leaves behind when a lineage dies out during a run. A sampled tree is therefore a
-`BinaryNode{NonMarkovCell}` indistinguishable in kind from a full one, and every function
-on the [Tree statistics](statistics.md) page applies to it unchanged.
-
-Two consequences worth internalising:
+```@example sampling
+full   = Dict(c.data.id => c.data.total_drivers for c in alive_cells(pop))
+sample = Dict(zip([l.data.id for l in alive_cells(s.root)],
+                  drivers_per_cell(s.root; includeclonal = true)))
+all(sample[id] == full[id] for id in s.sampled_ids)
+```
 
 !!! warning "The root of a sampled tree is the founder, not the MRCA of the sample"
-    Ancestry is retained all the way up, so `s.root` is the original founding cell even
-    when it has a single child. That is what makes `sitefrequencyspectrum(s.root, s.n)`
-    put the founder's mutations in `sfs[n]` exactly as the full tree puts them in
-    `sfs[N]`. If you want the sample's own MRCA, ask for it:
+    Ancestry is retained all the way up, so `site_frequency_spectrum(s.root, s.n)` puts
+    the founder's drivers in `sfs[n]` exactly as the full tree puts them in `sfs[N]`. For
+    the sample's own MRCA use `find_mrca(alive_cells(s.root))`.
 
-    ```julia
-    findMRCA(getalivecells(s.root))
-    ```
-
-!!! note "The sampled tree shares `data` with the source tree"
-    `NonMarkovCell` is immutable, so ids, birthtimes, mutation counts and fitness are
-    identical by construction rather than by copy — sampling allocates new `BinaryNode`s
-    but no new cells. To change something in a sampled tree, replace a node's `data`
-    wholesale (which rebinds only the sample); never mutate a cell in place, because
-    there is no such thing as a cell that belongs to only one of the trees.
+The sampled tree shares `data` with the source: `NonMarkovCell` is immutable, so ids,
+times, driver counts and fitness are identical by construction. Changing a node of the
+sampled tree (for example with [`set_fitness!`](@ref)) rebinds only that tree.
 
 ## Declaring what to produce
 
-[`SamplingSpec`](@ref) says what [`sample_trees`](@ref) should build from one finished
-tree.
+[`SamplingSpec`](@ref) says what [`sample_trees`](@ref) builds from one finished tree:
 
 | Intent | Spec |
 |:---|:---|
@@ -91,82 +75,41 @@ tree.
 | full tree plus several sizes | `SamplingSpec([1000, 100])` |
 | several independent draws per size | `SamplingSpec(sizes = [1000], replicates = 20)` |
 
-- `sizes` — the sample sizes to draw. Duplicates are rejected: use `replicates` for
-  repeated draws at one size.
-- `replicates` — independent draws per size, each with its own derived seed.
-- `retain_full` — whether the returned [`SampledTrees`](@ref) carries the full tree.
+Duplicate sizes are rejected (use `replicates`), and every size is checked against the
+tree before any draw is made. Results are ordered by size, then replicate.
 
-`SamplingSpec(n)` and `SamplingSpec([n1, n2])` are shorthands for the keyword form.
-Validation happens in the constructor, which is the only way to build one — there is no
-unvalidated positional path in.
-
-[`sample_trees`](@ref) checks every size against the tree **before** making any draw, so
-an oversized request fails immediately rather than after minutes of work. Results are
-ordered by the spec's `sizes`, and within a size by `replicate`.
-
-```julia
-out = sample_trees(pop, SamplingSpec(sizes = [1000, 100], replicates = 5);
-                   seed = UInt64(20260906))
-
-length(out.samples)                    # 10 = 2 sizes × 5 replicates
-[(s.n, s.replicate) for s in out.samples]
-```
-
-!!! note "`retain_full = false` does not free memory by itself"
-    It controls only what the returned bundle holds. It cannot release your own reference
-    to the tree, and it cannot release the tree reachable from a `Population` — every
-    living leaf holds a `parent` chain back to the founder, so while the population is
-    alive the whole history is alive. To actually bound memory across a sweep, drop both:
-
-    ```julia
-    out = sample_trees(pop, SamplingSpec(sizes = [1000], retain_full = false);
-                       seed = myseed)
-    pop = nothing
-    GC.gc()
-    ```
+`retain_full = false` only controls what the returned bundle holds: while the
+`Population` is alive, its whole tree is too, because every living cell holds a `parent`
+chain back to the founder. To bound memory across a sweep, drop the population yourself
+(`pop = nothing`) once it has been sampled.
 
 ## Reproducibility
 
-`seed` is required, not optional. The draw is a pure function of `(tree, n, seed)`, and
-each `LeafSample` records the seed it used, so any single draw replays in isolation from
-that record alone — you do not need the spec, the batch, or the order the batch ran in.
+`seed` is required: the draw is a pure function of `(tree, n, seed)`, and each
+`LeafSample` records its seed, so any single draw replays in isolation. Supply seeds
+derived from your own provenance (a simulation index, a sweep coordinate); two draws that
+should differ need different seeds. Within one batch, `sample_trees` derives a distinct
+per-draw seed from the base seed, the size and the replicate index.
 
-Callers supply the seed because they are the ones who can derive it from their own
-provenance: a filename stem, a simulation index, a sweep coordinate. Two draws that
-should differ must be given different seeds. `sample_trees` handles this for you inside
-one batch, deriving a distinct per-draw seed from the base seed, the size and the
-replicate index, with an explicit splitmix64 mix rather than `Base.hash`, so the derived
-seeds are the same on every Julia version.
-
-Each call builds its own `StableRNG` from the seed and touches no shared state, so
-independent draws are safe to run concurrently from your own threads.
+The recipe is **stable across Julia versions**: `StableRNG(seed)` drives a partial
+Fisher–Yates shuffle over `Leaves(root)` order, and per-draw seeds use an explicit
+splitmix64 mix. Golden tests pin both (see
+[Stability guarantees](concepts.md#Stability-guarantees)). Each call builds its own rng,
+so draws are safe to run concurrently.
 
 For one seed, draws at different `n` are **nested**: the `n = 10` draw is the first 10
 cells of the `n = 100` draw. That is harmless within `sample_trees`, whose per-draw seeds
-differ by size, but pass different seeds yourself if you need independent draws at
+differ by size, but pass different seeds yourself when you need independent draws at
 several sizes.
-
-!!! warning "The draw recipe is frozen"
-    `StableRNG(seed)` driving a partial Fisher–Yates shuffle (`rand(rng, i:N)` for
-    `i = 1:n`) over `Leaves(root)` order. StableRNGs.jl guarantees that stream across
-    Julia and package versions, so a stored seed reproduces its draw everywhere. Golden
-    tests pin both the draw and the seed derivation. Changing either invalidates stored
-    samples.
 
 ## Sampling needs a single-rooted tree
 
 `sample_leaves` and `sample_trees` throw an `ArgumentError` naming the number of roots
-when handed a forest — a population from `initialize_population(N)` with `N > 1`, where
-the founders share no ancestry. There is no sensible uniform draw across independent
-trees that also preserves "the root is the founder", so sample each root's tree
-separately:
+when handed a forest. There is no uniform draw across independent trees that keeps "the
+root is the founder", so sample each tree separately:
 
 ```julia
-using AbstractTrees
-
-roots   = AbstractTrees.getroot(allcells(pop))   # the distinct roots, one per tree
-samples = [sample_leaves(r, min(100, popsize(r)); seed = UInt64(i))
-           for (i, r) in enumerate(roots)]
+samples = [sample_leaves(r, min(100, popsize(r)); seed = i) for (i, r) in enumerate(roots(pop))]
 ```
 
 ## A typical sweep
@@ -176,23 +119,16 @@ using MutationLoadDynamics, Distributions, Random, Serialization
 
 block(s) = NonMarkovBlock(
     birth_dist = f -> Gamma(5.0, 1 / (5 * f)), death_dist = f -> Exponential(1 / 0.3),
-    stopfunction = pop -> popsize(pop) >= 100_000, driver_dist = Dirac(s),
-    fitness_update = (f, δ) -> f + δ, ν = 0.2, restart_on_extinction = true)
+    driver_dist = Dirac(s), fitness_update = (f, δ) -> f + δ, ν = 0.2,
+    stopfunction = pop -> popsize(pop) >= 100_000, restart_on_extinction = true)
 
 for (i, s) in enumerate(0.0:0.1:0.5)
-    pop = initialize_population(fitness_init = 1.0)
-    simulate!(pop, block(s), MersenneTwister(i))
-
-    out = sample_trees(pop, SamplingSpec(sizes = [1000, 100], replicates = 10),
-                       seed = UInt64(20260930 + i))   # any provenance you record
-
+    pop = simulate!(initialize_population(), block(s), MersenneTwister(i))
+    out = sample_trees(pop, SamplingSpec(sizes = [1000, 100], replicates = 10,
+                                         retain_full = false); seed = 20260930 + i)
     serialize("s=$(s).jls", out.samples)   # small: the samples, not the population
-    pop = nothing
-    GC.gc()
 end
 ```
 
-Serialising the samples rather than the population is the point: a `LeafSample` at
-``n = 1000`` is a tree of a few thousand nodes, against a population of ``10^6`` cells
-whose full history is orders of magnitude larger — and it replays exactly from its
-recorded seed if you ever need to prove where it came from.
+A `LeafSample` at ``n = 1000`` is a tree of a few thousand nodes, against a full history
+orders of magnitude larger — and it replays exactly from its recorded seed.

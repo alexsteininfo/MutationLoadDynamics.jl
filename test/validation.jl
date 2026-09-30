@@ -67,8 +67,8 @@ end
         birth_dist = f -> Gamma(5.0, 0.2), death_dist = f -> Dirac(Inf),
         stopfunction = p -> popsize(p) >= 5_000, driver_dist = Dirac(0.0),
         fitness_update = (f, δ) -> f, ν = ν), MersenneTwister(5))
-    root = getsingleroot(allcells(pop))
-    js   = [Float64(n.data.mutations) for n in PreOrderDFS(root) if n !== root]
+    root = single_root(pop)
+    js   = [Float64(n.data.drivers) for n in PreOrderDFS(root) if n !== root]
     @test length(js) == 2 * (5_000 - 1)
     @test abs(mean(js) / ν - 1) < 0.05
     @test abs(var(js) / ν - 1) < 0.08

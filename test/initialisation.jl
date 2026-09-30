@@ -6,14 +6,14 @@
     cell = first(values(pop.cells)).data
     @test cell.id == 1
     @test cell.fitness ≈ 2.0
-    @test cell.mutations == 0
-    @test cell.total_mutations == 0
+    @test cell.drivers == 0
+    @test cell.total_drivers == 0
     @test cell.birthtime ≈ 0.0
 end
 
 @testset "initialize_population accepts integer arguments" begin
     pop = initialize_population(3; fitness_init = 2, time = 1)
-    @test all(c.data.fitness === 2.0 for c in allcells(pop))
+    @test all(c.data.fitness === 2.0 for c in alive_cells(pop))
     @test pop.t === 1.0
     @test_throws ArgumentError initialize_population(0)
 end
@@ -24,13 +24,13 @@ end
     @test pop._next_id == 5
     for node in values(pop.cells)
         @test node.data.fitness ≈ 1.5
-        @test node.data.mutations == 0
+        @test node.data.drivers == 0
     end
 end
 
-@testset "allcells length and type" begin
+@testset "alive_cells length and type" begin
     pop = initialize_population(3)
-    cells = allcells(pop)
+    cells = alive_cells(pop)
     @test length(cells) == 3
     @test eltype(cells) == BinaryNode{NonMarkovCell}
 end

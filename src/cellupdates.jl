@@ -20,8 +20,8 @@ function celldivision!(
     d1_data = _make_daughter(population, t, parent, block, drivers, rng)
     d2_data = _make_daughter(population, t, parent, block, drivers, rng)
 
-    d1_node = leftchild!(parent_node, d1_data)
-    d2_node = rightchild!(parent_node, d2_data)
+    d1_node = left_child!(parent_node, d1_data)
+    d2_node = right_child!(parent_node, d2_data)
 
     delete!(population.cells, parent.id)
     population.cells[d1_data.id] = d1_node
@@ -45,7 +45,7 @@ function _make_daughter(
         f = block.fitness_update(f, δ)
     end
     pop._next_id += 1
-    return NonMarkovCell(pop._next_id, t, j, parent.total_mutations + j, f)
+    return NonMarkovCell(pop._next_id, t, j, parent.total_drivers + j, f)
 end
 
 """

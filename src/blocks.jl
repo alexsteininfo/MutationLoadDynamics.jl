@@ -1,109 +1,68 @@
 """
-    NonMarkovBlock{F1,F2,F3,F4,F5,F6,D}
+    NonMarkovBlock(; birth_dist, death_dist, driver_dist, fitness_update, ν,
+                     stopfunction = pop -> false, tmax = Inf,
+                     restart_on_extinction = false, on_division = nothing,
+                     on_restart = nothing)
 
-Defines a non-Markovian birth-death simulation. Division and death waiting times are
-drawn from arbitrary distributions (functions of the cell's fitness). The block runs
-until `stopfunction(pop)` returns `true`.
+Everything the cells do during one [`simulate!`](@ref) call.
 
-# Fields
-- `birth_dist::F1` — `(fitness::Float64) -> Distribution` — waiting-time distribution
-  for cell division; mean = expected time from birth to next division.
-- `death_dist::F2` — `(fitness::Float64) -> Distribution` — waiting-time distribution
-  for cell death.
-- `stopfunction::F3` — `(pop::Population) -> Bool` — simulation stop criterion.
-- `driver_dist::D` — distribution from which each driver mutation's fitness increment
-  `δ` is drawn (e.g. `Exponential(0.05)`).
-- `fitness_update::F4` — `(parent_fitness::Float64, δ::Float64) -> Float64` — how each
-  individual driver mutation changes the cell's fitness; applied once per mutation event.
-- `ν::Float64` — mean number of driver mutations per daughter cell per division
-  (Poisson distributed).
-- `restart_on_extinction::Bool` — if `true`, restart from the initial state whenever
-  the population goes extinct (default: `false`).
-- `on_division::F5` — optional `(pop, parent, d1, d2) -> Nothing` callback fired at every
-  division, or `nothing` (default) to disable. See "Division hook" below.
-- `on_restart::F6` — optional `(pop) -> Nothing` callback fired after the population is
-  restored following an extinction, or `nothing` (default). Only ever called when
-  `restart_on_extinction = true`. See "Restart hook" below.
+- `birth_dist`, `death_dist` — `f -> Distribution`: waiting time from a cell's birth to
+  its division, or to its death, given its fitness `f`. The earlier one happens.
+- `driver_dist` — distribution of one driver's effect size `δ`.
+- `fitness_update` — `(f, δ) -> f′`, applied once per driver.
+- `ν` — mean drivers per daughter per division (Poisson), `ν ≥ 0`.
+- `stopfunction` — `pop -> Bool`, tested before every event; the block stops when it
+  returns `true`.
+- `tmax` — the block also stops at exactly `pop.t = tmax`, without firing any later event.
+- `restart_on_extinction` — restore the starting state and retry whenever the
+  population dies out.
+- `on_division` — `(pop, parent, d1, d2) -> nothing`, called after each division and
+  before the daughters are scheduled. Change a daughter with [`set_fitness!`](@ref).
+- `on_restart` — `pop -> nothing`, called after each extinction restart, to reset
+  state kept in your hook closures.
 
-# Division hook
-
-`on_division` lets you apply a deterministic, state-triggered fitness change to a single
-cell at a single moment — something the Poisson-`ν` driver channel cannot express. It is
-called once per birth event, *after* the two daughters exist and *before* either is
-scheduled, so a fitness change applies to the boosted daughter's own first division
-rather than only to its descendants.
-
-Change a daughter's fitness with [`set_fitness!`](@ref)`(d1, 1.0 + s)`. The new fitness
-propagates to all future descendants automatically. Do not replace `d1.data` with a cell
-of a different `id` or mutation count: ids key `population.cells`, and
-`total_mutations` must stay consistent along the lineage.
-
-Note that `celldivision!` removes the parent and inserts both daughters before the hook
-runs, so inside the callback `popsize(pop)` is the pre-division size **+ 1**. To inject at
-`N_critic` cells, test `popsize(pop) == N_critic + 1`.
-
-Keep all hook state in the closure (no package-level mutable state), and do not consume
-the simulation's `rng` if seed reproducibility matters.
-
-# Restart hook
-
-On restart the package resets `cells`, `t`, `_next_id`, the pending event queue and what
-the accumulator recorded during this call, but it cannot reset state owned by your
-closure. A hook holding an `injected::Ref{Bool}` flag
-would therefore silently fail to inject on the second attempt. Use `on_restart` to reset
-that state:
-
-```julia
-injected  = Ref(false)
-on_restart = pop -> (injected[] = false)
-```
-
-Alternatively set `restart_on_extinction = false` and drive your own retry loop with a
-fresh closure per attempt, which is preferable when you also need to retry on other
-criteria (e.g. loss of the driver clone to drift).
-
-# Example
-```julia
-block = NonMarkovBlock(
-    birth_dist  = f -> Gamma(5.0, 1.0 / (5.0 * f)),   # mean 1/f, CV 1/√5
-    death_dist  = f -> Gamma(5.0, 1.0 / (5.0 * 0.2)), # mean 5
-    stopfunction = pop -> popsize(pop) >= 10_000,
-    driver_dist = Exponential(0.05),
-    fitness_update = (f, δ) -> f + δ,
-    ν = 0.5,
-)
-```
-
-Injecting a single driver into one daughter of the division that first takes the
-population past `N_critic` cells:
-
-```julia
-injected = Ref(false)
-block = NonMarkovBlock(
-    birth_dist  = f -> Gamma(5.0, 1.0 / (5.0 * f)),
-    death_dist  = f -> Gamma(5.0, 1.0 / (5.0 * 0.5)),
-    stopfunction = pop -> popsize(pop) >= 10_000,
-    driver_dist = Dirac(0.0),
-    fitness_update = (f, δ) -> f,
-    ν = 2.0,
-    on_division = function (pop, parent, d1, d2)
-        injected[] && return nothing
-        popsize(pop) == N_critic + 1 || return nothing
-        injected[] = true
-        set_fitness!(d1, 1.0 + s)
-        return nothing
-    end,
-)
-```
+The distributions are checked once at construction by calling them with `f = 1.0`. See
+the manual pages *The simulation block* and *Mutations and selection* for waiting-time
+parameterisations, stop conditions, hooks and selection modes.
 """
-@kwdef struct NonMarkovBlock{F1, F2, F3, F4, F5, F6, D}
+struct NonMarkovBlock{F1, F2, F3, F4, F5, F6, D}
     birth_dist::F1
     death_dist::F2
     stopfunction::F3
     driver_dist::D
     fitness_update::F4
     ν::Float64
-    restart_on_extinction::Bool = false
-    on_division::F5 = nothing
-    on_restart::F6  = nothing
+    tmax::Float64
+    restart_on_extinction::Bool
+    on_division::F5
+    on_restart::F6
+
+    function NonMarkovBlock(birth_dist::F1, death_dist::F2, stopfunction::F3,
+                            driver_dist::D, fitness_update::F4, ν::Real, tmax::Real,
+                            restart_on_extinction::Bool, on_division::F5,
+                            on_restart::F6) where {F1, F2, F3, F4, F5, F6, D}
+        ν >= 0 || throw(ArgumentError("NonMarkovBlock: ν must be >= 0, got $ν"))
+        isnan(tmax) && throw(ArgumentError("NonMarkovBlock: tmax must not be NaN"))
+        driver_dist isa Sampleable{Univariate} || throw(ArgumentError(
+            "NonMarkovBlock: driver_dist must be a univariate distribution, got " *
+            "$(typeof(driver_dist))"))
+        for (name, dist) in (("birth_dist", birth_dist), ("death_dist", death_dist))
+            d = dist(1.0)
+            d isa Sampleable{Univariate} || throw(ArgumentError(
+                "NonMarkovBlock: $name must map a fitness to a univariate distribution; " *
+                "$name(1.0) returned a $(typeof(d))"))
+        end
+        return new{F1, F2, F3, F4, F5, F6, D}(birth_dist, death_dist, stopfunction,
+            driver_dist, fitness_update, ν, tmax, restart_on_extinction, on_division,
+            on_restart)
+    end
+end
+
+function NonMarkovBlock(; birth_dist, death_dist, driver_dist, fitness_update, ν,
+                        stopfunction = Returns(false), tmax::Real = Inf,
+                        restart_on_extinction::Bool = false, on_division = nothing,
+                        on_restart = nothing)
+    return NonMarkovBlock(birth_dist, death_dist, stopfunction, driver_dist,
+                          fitness_update, ν, tmax, restart_on_extinction, on_division,
+                          on_restart)
 end
