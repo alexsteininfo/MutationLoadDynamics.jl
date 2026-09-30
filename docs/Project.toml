@@ -1,4 +1,5 @@
 [deps]
+AbstractTrees = "1520ce14-60c1-5f80-bbc7-55ef81b5835c"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 NonMarkovEvolution = "7b855ee6-6887-412f-a571-26d20a5a92d7"
