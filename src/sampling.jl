@@ -1,11 +1,10 @@
 # Uniform leaf sampling of lineage trees.
 #
 # The induced tree keeps the sampled leaves plus *every ancestor* of a sampled
-# leaf, and retains the resulting unary nodes rather than collapsing them. That is
-# the load-bearing decision: because every division ancestral to a sampled cell is
-# still a node, a sampled cell's root-to-leaf path is unchanged, so
-# `mutations_per_cell` and `leaf_depths` return exactly that cell's *full-tree*
-# burden and divisional depth. Collapsing would turn depth into a count of
+# leaf, and retains the resulting unary nodes rather than collapsing them. Because
+# every division ancestral to a sampled cell is still a node, a sampled cell's
+# root-to-leaf path is unchanged, so `mutations_per_cell(root; includeclonal = true)`
+# and `leaf_depths` return exactly that cell's *full-tree* burden and divisional depth. Collapsing would turn depth into a count of
 # bifurcations that survived sampling — a property of the sample rather than of the
 # cell. It is also the shape `prune_tree!` already leaves behind when a lineage
 # dies out, so a sampled tree is indistinguishable in kind from a full one and
@@ -49,64 +48,53 @@ end
 
 # Copy the marked part of the tree. Left/right slots are preserved, so a node whose
 # left lineage was dropped keeps `left = nothing` — the tree stays a faithful
-# sub-shape of the original rather than being silently re-balanced.
-function _copy_marked(node::BinaryNode{NonMarkovCell},
-                      marked::Set{BinaryNode{NonMarkovCell}})
-    new = BinaryNode(node.data)
-    if !isnothing(node.left) && node.left in marked
-        new.left = _copy_marked(node.left, marked)
-        new.left.parent = new
+# sub-shape of the original rather than being re-balanced. Iterative, so deep trees
+# cannot overflow the stack.
+function _copy_marked(root::BinaryNode{NonMarkovCell},
+                      marked::Base.IdSet{BinaryNode{NonMarkovCell}})
+    new_root = BinaryNode(root.data)
+    stack = [(root, new_root)]
+    while !isempty(stack)
+        old, new = pop!(stack)
+        if !isnothing(old.left) && old.left in marked
+            new.left = BinaryNode{NonMarkovCell}(old.left.data, new)
+            push!(stack, (old.left, new.left))
+        end
+        if !isnothing(old.right) && old.right in marked
+            new.right = BinaryNode{NonMarkovCell}(old.right.data, new)
+            push!(stack, (old.right, new.right))
+        end
     end
-    if !isnothing(node.right) && node.right in marked
-        new.right = _copy_marked(node.right, marked)
-        new.right.parent = new
-    end
-    return new
+    return new_root
 end
 
-"""
-    sample_leaves(root, n; seed, replicate = 1) -> LeafSample
-    sample_leaves(population, n; seed, replicate = 1) -> LeafSample
+# The first `n` entries of a uniformly random permutation of `1:N` (partial
+# Fisher–Yates). Uses only `rand(rng, a:b)`, whose stream `StableRNG` guarantees across
+# Julia and StableRNGs versions — unlike `randperm`, whose algorithm Julia changed in
+# 1.11. Changing this function invalidates every stored draw.
+function _draw_indices(rng::StableRNG, N::Int, n::Int)
+    perm = collect(1:N)
+    for i in 1:n
+        j = rand(rng, i:N)
+        perm[i], perm[j] = perm[j], perm[i]
+    end
+    return perm[1:n]
+end
 
-Draw `n` of the tree's leaves uniformly without replacement and return the induced
-lineage tree as a [`LeafSample`](@ref).
-
-`seed` is required and supplied by the caller: the draw must be reproducible from
-values the caller itself records, and callers derive seeds from their own
-provenance (a filename stem, a simulation index). Two draws that should differ
-must be given different seeds.
-
-Non-destructive — `root` is left untouched, because the same tree is normally
-drawn from again at other sample sizes and those draws must be independent.
-Single-threaded by design: each call builds its own rng from `seed`, so
-independent draws are safe to run concurrently from the caller's own threads.
-
-Cost is proportional to the number of *retained* nodes, not to the size of the
-tree.
-
-!!! warning "The draw recipe is frozen"
-    `MersenneTwister(seed)` and `randperm(rng, N_full)[1:n]` over `Leaves(root)`
-    order are load-bearing, not incidental: serialized sampled trees produced by
-    earlier versions of this algorithm must stay reproducible. Do not substitute a
-    different rng, `StatsBase.sample`, or a direct `n`-index draw.
-"""
-function sample_leaves(root::BinaryNode{NonMarkovCell}, n::Int;
-                       seed::UInt64, replicate::Int = 1)
-    leaves = collect(Leaves(root))
+# Draw from an already-collected leaf list, so `sample_trees` traverses the tree once.
+function _sample_leaves(root::BinaryNode{NonMarkovCell},
+                        leaves::Vector{BinaryNode{NonMarkovCell}},
+                        n::Int, seed::UInt64, replicate::Int)
     N_full = length(leaves)
     1 <= n <= N_full || throw(ArgumentError(
         "cannot draw n = $n cells from a tree with $N_full leaves"))
     replicate >= 1 || throw(ArgumentError("replicate must be >= 1, got $replicate"))
 
-    # `Leaves` visits a fixed tree in a fixed order (`children` returns
-    # `(left, right)`), so the draw is a pure function of (tree, seed, n).
-    rng = MersenneTwister(seed)
-    idx = randperm(rng, N_full)[1:n]
+    idx = _draw_indices(StableRNG(seed), N_full, n)
 
     # Mark each sampled leaf and its ancestors, stopping at the first node already
-    # marked: total cost is the number of retained nodes, not the size of the tree.
-    # `BinaryNode` is mutable, so `Set` compares by identity.
-    marked = Set{BinaryNode{NonMarkovCell}}()
+    # marked, so marking costs the number of retained nodes.
+    marked = Base.IdSet{BinaryNode{NonMarkovCell}}()
     for i in idx
         node = leaves[i]
         while !isnothing(node) && !(node in marked)
@@ -120,18 +108,44 @@ function sample_leaves(root::BinaryNode{NonMarkovCell}, n::Int;
     return LeafSample(new_root, n, N_full, seed, replicate, sampled_ids)
 end
 
-function sample_leaves(population::Population, n::Int;
-                       seed::UInt64, replicate::Int = 1)
-    root = getsingleroot(allcells(population))
-    if isnothing(root)
-        nroots = length(AbstractTrees.getroot(allcells(population)))
-        nroots == 0 && throw(ArgumentError(
-            "population has no cells to sample from"))
-        throw(ArgumentError(
-            "population has $nroots independent roots (it is a forest), but " *
-            "sampling needs one — sample each root's tree separately"))
-    end
-    return sample_leaves(root, n; seed = seed, replicate = replicate)
+"""
+    sample_leaves(root, n; seed, replicate = 1) -> LeafSample
+    sample_leaves(population, n; seed, replicate = 1) -> LeafSample
+
+Draw `n` of the tree's leaves uniformly without replacement and return the induced
+lineage tree as a [`LeafSample`](@ref).
+
+`seed` is required and supplied by the caller: the draw must be reproducible from
+values the caller itself records, and callers derive seeds from their own
+provenance (a filename stem, a simulation index). Two draws that should differ
+must be given different seeds. For one seed, draws at different `n` are nested: the
+`n = 1` draw is the first cell of the `n = 2` draw, and so on.
+
+Non-destructive — `root` is left untouched, because the same tree is normally
+drawn from again at other sample sizes. Each call builds its own rng from `seed`, so
+independent draws are safe to run concurrently from the caller's own threads.
+
+Cost: one O(N) pass to list the leaves, plus the number of retained nodes.
+
+!!! warning "The draw recipe is frozen"
+    The draw is a pure function of `(tree, n, seed)`, stable across Julia versions:
+    `StableRNG(seed)` drives a partial Fisher–Yates shuffle over `Leaves(root)` order.
+    Stored samples depend on it; a golden test pins it.
+"""
+sample_leaves(root::BinaryNode{NonMarkovCell}, n::Int; seed::UInt64, replicate::Int = 1) =
+    _sample_leaves(root, _leaves(root), n, seed, replicate)
+
+sample_leaves(population::Population, n::Int; seed::UInt64, replicate::Int = 1) =
+    sample_leaves(_single_root(population), n; seed = seed, replicate = replicate)
+
+# The unique root of a population, or an `ArgumentError` naming why there is none.
+function _single_root(population::Population)
+    roots = _population_roots(population)
+    isempty(roots) && throw(ArgumentError("population has no cells to sample from"))
+    length(roots) == 1 || throw(ArgumentError(
+        "population has $(length(roots)) independent roots (it is a forest), but " *
+        "sampling needs one — sample each root's tree separately"))
+    return only(roots)
 end
 
 # ── Declaring what to produce ────────────────────────────────────────────────
@@ -175,9 +189,7 @@ struct SamplingSpec
     replicates::Int
     retain_full::Bool
 
-    # Inner constructor: this is the ONLY way to build a `SamplingSpec`, so there is
-    # no unvalidated path in — Julia would otherwise still expose the auto-generated
-    # default positional constructor, which skips every check below.
+    # The only constructor, so no unvalidated `SamplingSpec` can exist.
     function SamplingSpec(sizes::AbstractVector{<:Integer},
                           replicates::Integer,
                           retain_full::Bool)
@@ -215,10 +227,17 @@ struct SampledTrees
     samples::Vector{LeafSample}
 end
 
-# Per-draw seed. Depends on the base seed, the size and the replicate index, so no
-# two draws in one spec share a seed, and each stored seed replays its own draw in
-# isolation.
-_draw_seed(base::UInt64, n::Int, replicate::Int) = hash((base, n, replicate))
+# Per-draw seed: splitmix64 finalisation over (base, n, replicate). Written out rather
+# than using `Base.hash`, which is not guaranteed stable across Julia versions, so that a
+# base seed reproduces the same draws everywhere. Changing it invalidates stored draws.
+function _splitmix64(x::UInt64)
+    x += 0x9e3779b97f4a7c15
+    x = (x ⊻ (x >> 30)) * 0xbf58476d1ce4e5b9
+    x = (x ⊻ (x >> 27)) * 0x94d049bb133111eb
+    return x ⊻ (x >> 31)
+end
+_draw_seed(base::UInt64, n::Int, replicate::Int) =
+    _splitmix64(_splitmix64(_splitmix64(base) ⊻ UInt64(n)) ⊻ UInt64(replicate))
 
 """
     sample_trees(root, spec; seed) -> SampledTrees
@@ -227,9 +246,9 @@ _draw_seed(base::UInt64, n::Int, replicate::Int) = hash((base, n, replicate))
 Apply a [`SamplingSpec`](@ref) to one finished tree.
 
 Sizes are validated against the tree *before* any draw is made, so a size larger
-than the tree fails immediately rather than after minutes of work.
-Per-draw seeds are derived from `seed`, the size and the replicate index and are
-recorded on each [`LeafSample`](@ref).
+than the tree fails immediately. Per-draw seeds are derived from `seed`, the size and
+the replicate index, are stable across Julia versions, and are recorded on each
+[`LeafSample`](@ref) so that any draw replays in isolation.
 
 Sampling is post-hoc: it applies to a tree that has finished growing. It is
 deliberately not part of `NonMarkovBlock` or `MeasurementSpec`, both of which
@@ -237,10 +256,8 @@ describe things that happen *during* `simulate!`.
 """
 function sample_trees(root::BinaryNode{NonMarkovCell}, spec::SamplingSpec;
                       seed::UInt64)
-    N_full = length(collect(Leaves(root)))
-    # Every size is validated here before any draw is made below, regardless of
-    # order — sorting first would only change which oversized size's message is
-    # raised when more than one is invalid, not whether validation precedes drawing.
+    leaves = _leaves(root)
+    N_full = length(leaves)
     for n in spec.sizes
         n <= N_full || throw(ArgumentError(
             "SamplingSpec asks for n = $n cells but the tree has $N_full leaves"))
@@ -248,21 +265,10 @@ function sample_trees(root::BinaryNode{NonMarkovCell}, spec::SamplingSpec;
 
     samples = LeafSample[]
     for n in spec.sizes, r in 1:spec.replicates
-        push!(samples, sample_leaves(root, n;
-                                     seed = _draw_seed(seed, n, r), replicate = r))
+        push!(samples, _sample_leaves(root, leaves, n, _draw_seed(seed, n, r), r))
     end
     return SampledTrees(spec.retain_full ? root : nothing, samples)
 end
 
-function sample_trees(population::Population, spec::SamplingSpec; seed::UInt64)
-    root = getsingleroot(allcells(population))
-    if isnothing(root)
-        nroots = length(AbstractTrees.getroot(allcells(population)))
-        nroots == 0 && throw(ArgumentError(
-            "population has no cells to sample from"))
-        throw(ArgumentError(
-            "population has $nroots independent roots (it is a forest), but " *
-            "sampling needs one — sample each root's tree separately"))
-    end
-    return sample_trees(root, spec; seed = seed)
-end
+sample_trees(population::Population, spec::SamplingSpec; seed::UInt64) =
+    sample_trees(_single_root(population), spec; seed = seed)

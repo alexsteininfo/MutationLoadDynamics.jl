@@ -2,17 +2,31 @@
 
 abstract type AbstractTrigger end
 
-"""Fire once when `simulate!` exits (stop condition met or N = 0)."""
+"""
+Fire when a `simulate!` call exits (stop condition met or extinction) — once per call,
+so an accumulator carried across chained blocks gets one snapshot per block.
+"""
 struct AtEnd <: AbstractTrigger end
 
-"""Fire once when simulation time first reaches or exceeds `t`."""
+"""
+Fire once with the population state exactly at simulation time `t`, i.e. after every
+event at or before `t` and before any later one. The snapshot is labelled `t`.
+"""
 struct AtTime <: AbstractTrigger
     t::Float64
+    function AtTime(t::Real)
+        isnan(t) && throw(ArgumentError("AtTime: t must not be NaN"))
+        return new(t)
+    end
 end
 
-"""Fire once when population size first reaches or exceeds `N`."""
+"""Fire once, at the first moment the population size is at least `N`."""
 struct AtPopSize <: AbstractTrigger
     N::Int
+    function AtPopSize(N::Integer)
+        N >= 1 || throw(ArgumentError("AtPopSize: N must be >= 1, got $N"))
+        return new(N)
+    end
 end
 
 # ── Statistic types ───────────────────────────────────────────────────────────
@@ -36,7 +50,8 @@ struct DriversPerCell <: AbstractStatistic end
 Declares what to record during `simulate!`.
 
 # Keyword arguments
-- `trajectory_dt::Float64` — time between trajectory points; `Inf` disables trajectory recording.
+- `trajectory_dt::Float64` — time between trajectory points (must be `> 0`); `Inf`
+  disables trajectory recording.
 - `snapshot_triggers` — vector of `AbstractTrigger`s specifying when to take snapshots.
 - `snapshot_stats` — vector of `AbstractStatistic`s specifying what to compute at each snapshot.
 
@@ -56,6 +71,13 @@ struct MeasurementSpec
     trajectory_dt::Float64
     snapshot_triggers::Vector{AbstractTrigger}
     snapshot_stats::Vector{AbstractStatistic}
+
+    function MeasurementSpec(trajectory_dt::Real, snapshot_triggers, snapshot_stats)
+        # `> 0` also rejects NaN. A zero step would make trajectory recording loop forever.
+        trajectory_dt > 0 || throw(ArgumentError(
+            "MeasurementSpec: trajectory_dt must be > 0 (Inf disables it), got $trajectory_dt"))
+        return new(trajectory_dt, snapshot_triggers, snapshot_stats)
+    end
 end
 
 function MeasurementSpec(;
@@ -75,8 +97,10 @@ end
 """
     TrajectoryPoint
 
-One sample in a continuously recorded population trajectory.
-Collected every `MeasurementSpec.trajectory_dt` simulation-time units.
+One sample in a continuously recorded population trajectory, taken every
+`MeasurementSpec.trajectory_dt` simulation-time units. Each point is the exact state at
+its grid time `t`. `k` is a cell's total driver count; the variances are `NaN` while only
+one cell is alive.
 """
 struct TrajectoryPoint
     t::Float64
@@ -129,9 +153,11 @@ m   = finalize_measurements(acc)
 ```
 
 One accumulator can be carried across chained `simulate!` calls: trajectory recording
-resumes at the current `population.t` rather than back-filling from zero, and a trigger
-that already fired is not fired again. An extinction restart clears it, so what it holds
-describes the successful attempt only.
+resumes at the current `population.t` rather than back-filling from zero, `AtTime` and
+`AtPopSize` triggers that already fired do not fire again, and `AtEnd` fires at the end
+of every call. An extinction restart discards only what was recorded during the current
+call, so earlier blocks' records survive and the current block's describe its successful
+attempt.
 
 Its fields are internal bookkeeping — read results from `finalize_measurements`, which
 copies, leaving the accumulator usable afterwards.
@@ -142,12 +168,29 @@ mutable struct MeasurementAccumulator
     trajectory_points::Vector{TrajectoryPoint}
     snapshots::Vector{SnapshotData}
     fired_triggers::Set{Int}
+    # Time at which the current `simulate!` call started. An `AtTime` earlier than this
+    # cannot be recorded exactly any more, so it never fires.
+    call_start_t::Float64
 end
 
 MeasurementAccumulator(spec::MeasurementSpec) =
-    MeasurementAccumulator(spec, 0.0, TrajectoryPoint[], SnapshotData[], Set{Int}())
+    MeasurementAccumulator(spec, 0.0, TrajectoryPoint[], SnapshotData[], Set{Int}(), 0.0)
+
+# Called by `simulate!` on entry.
+function _start_call!(acc::MeasurementAccumulator, pop::Population)
+    acc.call_start_t = pop.t
+    # Start recording at the current time: a fresh accumulator handed to a chained call
+    # would otherwise back-fill points from t = 0 up to pop.t.
+    acc.next_trajectory_t = max(acc.next_trajectory_t, pop.t)
+    return acc
+end
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
+#
+# Timing convention: the population state is right-continuous — the state "at time t"
+# includes every event at or before t. `simulate!` calls `_record_until!` with the
+# time of the next event *before* applying it, so every grid time and every `AtTime`
+# strictly earlier than that event is recorded with the state that held there exactly.
 
 function _compute_snapshot(
     stats::Vector{AbstractStatistic},
@@ -170,53 +213,68 @@ function _compute_snapshot(
     return SnapshotData(t, trigger, sfs_val, fitness_val, drivers_val)
 end
 
-function record_trajectory_if_due!(acc::MeasurementAccumulator, pop::Population)
-    isinf(acc.spec.trajectory_dt) && return
-    t = pop.t
-    N = popsize(pop)
-    N == 0 && return
-    while t >= acc.next_trajectory_t
+function _push_snapshot!(acc::MeasurementAccumulator, i::Int, trigger, pop, t)
+    push!(acc.fired_triggers, i)
+    push!(acc.snapshots, _compute_snapshot(acc.spec.snapshot_stats, trigger, pop, t))
+end
+
+# Record every trajectory point and fire every `AtTime` trigger strictly before `t_next`
+# (or at or before it when `inclusive`), using the current state.
+function _record_until!(acc::MeasurementAccumulator, pop::Population, t_next::Float64;
+                        inclusive::Bool = false)
+    due(t) = inclusive ? t <= t_next : t < t_next
+    dt = acc.spec.trajectory_dt
+    if !isinf(dt) && due(acc.next_trajectory_t) && popsize(pop) > 0
         fitnesses = fitness_per_cell(pop)
         ks        = Float64.(mutations_per_cell(pop))
-        push!(acc.trajectory_points, TrajectoryPoint(
-            acc.next_trajectory_t, N,
-            mean(fitnesses), var(fitnesses),
-            mean(ks), var(ks),
-        ))
-        acc.next_trajectory_t += acc.spec.trajectory_dt
+        mf, vf    = mean(fitnesses), var(fitnesses)
+        mk, vk    = mean(ks), var(ks)
+        while due(acc.next_trajectory_t)
+            push!(acc.trajectory_points,
+                  TrajectoryPoint(acc.next_trajectory_t, popsize(pop), mf, vf, mk, vk))
+            acc.next_trajectory_t += dt
+        end
+    end
+    for (i, trigger) in enumerate(acc.spec.snapshot_triggers)
+        trigger isa AtTime && !(i in acc.fired_triggers) && due(trigger.t) &&
+            trigger.t >= acc.call_start_t &&
+            _push_snapshot!(acc, i, trigger, pop, trigger.t)
     end
 end
 
-function check_timed_triggers!(acc::MeasurementAccumulator, pop::Population)
-    t = pop.t
+function _check_popsize_triggers!(acc::MeasurementAccumulator, pop::Population)
     N = popsize(pop)
     for (i, trigger) in enumerate(acc.spec.snapshot_triggers)
-        i in acc.fired_triggers && continue
-        fire = (trigger isa AtTime    && t >= trigger.t) ||
-               (trigger isa AtPopSize && N >= trigger.N)
-        if fire
-            push!(acc.fired_triggers, i)
-            push!(acc.snapshots,
-                _compute_snapshot(acc.spec.snapshot_stats, trigger, pop, Float64(t)))
-        end
+        trigger isa AtPopSize && !(i in acc.fired_triggers) && N >= trigger.N &&
+            _push_snapshot!(acc, i, trigger, pop, pop.t)
     end
 end
 
-function _fire_end_triggers!(acc::MeasurementAccumulator, pop::Population)
-    for (i, trigger) in enumerate(acc.spec.snapshot_triggers)
-        if trigger isa AtEnd && !(i in acc.fired_triggers)
-            push!(acc.fired_triggers, i)
-            push!(acc.snapshots,
-                _compute_snapshot(acc.spec.snapshot_stats, trigger, pop, pop.t))
-        end
+# At exit: the final state holds at `pop.t`, so grid points and `AtTime`s at exactly
+# `pop.t` are still due; then every `AtEnd` fires (once per call, never marked fired).
+function _finish_call!(acc::MeasurementAccumulator, pop::Population)
+    _record_until!(acc, pop, pop.t; inclusive = true)
+    for trigger in acc.spec.snapshot_triggers
+        trigger isa AtEnd && push!(acc.snapshots,
+            _compute_snapshot(acc.spec.snapshot_stats, trigger, pop, pop.t))
     end
 end
 
-function _reset_accumulator!(acc::MeasurementAccumulator, t0::Float64 = 0.0)
-    empty!(acc.trajectory_points)
-    empty!(acc.snapshots)
-    empty!(acc.fired_triggers)
-    acc.next_trajectory_t = t0
+# What the accumulator held when a `simulate!` call began, so that an extinction
+# restart can discard exactly what that call recorded.
+_checkpoint(acc::MeasurementAccumulator) = (
+    n_points  = length(acc.trajectory_points),
+    n_snaps   = length(acc.snapshots),
+    fired     = copy(acc.fired_triggers),
+    next_t    = acc.next_trajectory_t,
+)
+
+function _rollback!(acc::MeasurementAccumulator, cp)
+    resize!(acc.trajectory_points, cp.n_points)
+    resize!(acc.snapshots, cp.n_snaps)
+    acc.fired_triggers    = copy(cp.fired)
+    acc.next_trajectory_t = cp.next_t
+    return acc
 end
 
 # ── Public API ────────────────────────────────────────────────────────────────

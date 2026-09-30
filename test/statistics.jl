@@ -1,16 +1,6 @@
-function simple_pop(; Nmax=50, ν=1.0, rng=MersenneTwister(1))
-    block = NonMarkovBlock(
-        birth_dist     = f -> Gamma(2.0, 1.0 / f),
-        death_dist     = f -> Gamma(2.0, 20.0),
-        stopfunction   = pop -> popsize(pop) >= Nmax,
-        driver_dist    = Exponential(0.1),
-        fitness_update = (f, δ) -> f + δ,
-        ν              = ν,
-    )
-    pop = initialize_population(fitness_init = 1.0)
-    simulate!(pop, block, rng)
-    return pop
-end
+@isdefined(fixture_tree) || include("fixtures.jl")
+
+simple_pop(; kwargs...) = grown_population(; kwargs...)
 
 @testset "fitness_per_cell length and positivity" begin
     pop = simple_pop()
@@ -79,26 +69,57 @@ end
     @test vk >= 0.0
 end
 
-# ── Fixture shared by the promoted tree statistics ────────────────────────────
-# Hand-built tree with observables known by hand; the expected values below are
-# the HR-10 ground truth carried over from the study repo's verifier.
-#
-#   root (id 1, mut 5) ├── L (id 2, mut 1) ├── LL (id 4, mut 2) leaf
-#                      │                   └── LR (id 5, mut 3) leaf
-#                      └── R (id 3, mut 7) leaf
-function fixture_tree()
-    root = BinaryNode(NonMarkovCell(1, 0.0, 5, 1.0))
-    L = leftchild!(root,  NonMarkovCell(2, 1.0, 1, 1.0))
-    rightchild!(root,     NonMarkovCell(3, 1.2, 7, 1.0))
-    leftchild!(L,         NonMarkovCell(4, 2.0, 2, 1.0))
-    rightchild!(L,        NonMarkovCell(5, 2.1, 3, 1.0))
-    return root
-end
+# ── Hand-built fixture (see fixtures.jl) ──────────────────────────────────────
 
 @testset "fixture has the expected shape" begin
     root = fixture_tree()
     @test [l.data.id for l in Leaves(root)] == [4, 5, 3]
-    @test mutations_per_cell(root) == [8, 9, 12]
+    @test mutations_per_cell(root; includeclonal = true) == [8, 9, 12]
+end
+
+@testset "includeclonal: false drops the root's own mutations, true keeps everything" begin
+    root = fixture_tree()
+    L    = root.left
+    @test mutations_per_cell(root) == [3, 4, 7]        # root's 5 are clonal
+    @test mutations_per_cell(L) == [2, 3]              # L's 1 and root's 5 are clonal
+    @test mutations_per_cell(L; includeclonal = true) == [8, 9]
+end
+
+@testset "distances, MRCA and coalescence on the fixture" begin
+    root = fixture_tree()
+    LL, LR, R = root.left.left, root.left.right, root.right
+    @test findMRCA(LL, LR) === root.left
+    @test findMRCA(LL, R) === root
+    @test findMRCA([LL, LR, R]) === root
+    @test findMRCA(LL, LL) === LL
+    @test pairwisedistance(LL, LR) == 5
+    @test pairwisedistance(LL, R)  == 10
+    @test pairwisedistance(LR, R)  == 11
+    @test pairwisedistance(R, R)   == 0
+    # Leaves order [LL, LR, R]; the MRCA of LL and LR divided at 2.0, the root at 1.0.
+    @test coalescence_times(root; t = 3.0) == [1.0, 2.0, 2.0]
+    @test coalescence_times(root, [1, 3]; t = 3.0) == [2.0]
+    @test celllifetimes(root) == [1.0, 1.0]            # root 0→1, L 1→2
+    @test age(root) == 2.1
+end
+
+@testset "tree statistics agree with independent walks on a simulated tree" begin
+    pop  = simple_pop(ν = 2.0, Nmax = 150)
+    root = getsingleroot(allcells(pop))
+    @test MutationLoadDynamics._leaves(root) == collect(Leaves(root))
+    @test getalivecells(root) == collect(Leaves(root))
+    burden = id_burden_map(root)
+    @test mutations_per_cell(root; includeclonal = true) ==
+          [burden[l.data.id] for l in Leaves(root)]
+    @test sort(mutations_per_cell(pop)) == sort(collect(values(burden)))
+    @test sort(leaf_depths(root)) == sort(collect(values(id_depth_map(root))))
+    @test clonal_mutations(pop) == findMRCA(pop).data.total_mutations
+    cells = getalivecells(root)[1:12]
+    for a in cells, b in cells
+        m = findMRCA(a, b)
+        @test pairwisedistance(a, b) == burden[a.data.id] + burden[b.data.id] -
+                                         2 * m.data.total_mutations
+    end
 end
 
 @testset "leaf_depths on the fixture" begin
@@ -109,7 +130,7 @@ end
 end
 
 @testset "leaf_depths on a single-node tree" begin
-    root = BinaryNode(NonMarkovCell(1, 0.0, 3, 1.0))
+    root = rootnode(1, 0.0, 3)
     @test leaf_depths(root) == [0]
 end
 
@@ -127,6 +148,7 @@ end
     # sfs[3] = 5         (the root subtends all three leaves)
     @test sitefrequencyspectrum(root, 3) == [12, 1, 5]
     @test sitefrequencyspectrum(root)    == [12, 1, 5]
+    @test sitefrequencyspectrum(root.left) == [5, 1]   # a subtree is a tree too
 end
 
 @testset "SFS on a forest counts every root's tree" begin
@@ -213,16 +235,14 @@ end
 
 @testset "leaf_fitness picks up a driver" begin
     root = fixture_tree()
-    leaf = first(getalivecells(root))
-    c    = leaf.data
-    leaf.data = NonMarkovCell(c.id, c.birthtime, c.mutations, 1.5)
+    set_fitness!(first(getalivecells(root)), 1.5)
     @test leaf_fitness(root) == [1.5, 1.0, 1.0]
 end
 
 @testset "filtered_mutations_per_cell with threshold 1.0 equals the full burden" begin
     root = fixture_tree()
     # floor(1.0 * 3) = 3, so no node is excluded.
-    @test filtered_mutations_per_cell(root, 1.0) == mutations_per_cell(root)
+    @test filtered_mutations_per_cell(root, 1.0) == mutations_per_cell(root; includeclonal = true)
 end
 
 @testset "filtered_mutations_per_cell excludes the root at a low threshold" begin
@@ -236,8 +256,38 @@ end
 @testset "filtered_mutations_per_cell is bounded by the full burden" begin
     pop  = simple_pop(ν = 2.0, Nmax = 40)
     root = getsingleroot(allcells(pop))
-    full = mutations_per_cell(root)
+    full = mutations_per_cell(root; includeclonal = true)
     filt = filtered_mutations_per_cell(root, 0.3)
     @test length(filt) == length(full)
     @test all(filt .<= full)
+end
+
+@testset "filtered_mutations_per_cell on a subtree stops at the subtree root" begin
+    root = fixture_tree()
+    @test filtered_mutations_per_cell(root.left, 1.0) == [3, 4]   # L's 1 counted, root's not
+    @test filtered_mutations_per_cell(root.left, 0.5) == [2, 3]   # L subtends 2 > floor(1)
+end
+
+@testset "forests: MRCA, distance and coalescence across trees" begin
+    # Tree B's root has a larger id than a non-root node of tree A. The old climb
+    # followed `parent` into `nothing` and crashed here.
+    a  = rootnode(1, 0.0, 2)
+    a1 = child!(:left, a, 2, 1.0, 1); child!(:right, a, 3, 1.0, 0)
+    b  = rootnode(10, 0.5, 4)
+    @test isnothing(findMRCA(a1, b))
+    @test isnothing(findMRCA(b, a1))
+    @test pairwisedistance(a1, b) == 3 + 4
+    @test MutationLoadDynamics._coalescence_time(a1, b, 5.0) == 5.0   # back to t = 0
+    pop = initialize_population(4)
+    @test isnothing(findMRCA(pop))
+    @test clonal_mutations(pop) == 0
+    @test length(coalescence_times(pop)) == 6
+    @test length(MutationLoadDynamics._roots(allcells(pop))) == 4
+end
+
+@testset "pairwise helpers handle fewer than two cells" begin
+    pop = initialize_population()
+    @test pairwisedistances(pop) == Int64[]
+    @test coalescence_times(pop) == Float64[]
+    @test isempty(pairwise_differences(pop))
 end

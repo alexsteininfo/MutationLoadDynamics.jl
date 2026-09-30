@@ -14,6 +14,8 @@ This is a **simulator**: it does not infer trees, fit parameters, or compare pop
 
 ## Install
 
+Requires Julia 1.10 or newer.
+
 ```julia
 using Pkg
 Pkg.add(url = "https://github.com/alexsteininfo/MutationLoadDynamics.jl")
@@ -119,14 +121,16 @@ Documented rather than silently settled — see the manual's Limitations page:
 - **Rates are frozen at each cell's birth.** Density-dependent rules evaluate the density
   as of a cell's birth, so a homeostatic ceiling is overshot. Chaining blocks is the exact
   alternative.
-- **Chaining and `restart_on_extinction` do not combine**; use the restart flag on the
-  first block only.
 - **Cell-cycle durations are independent between relatives**, which underestimates the
   lineage-level clustering seen in real data.
 - **`leaf_depths` is not co-indexed** with the other per-leaf statistics, and its order is
   frozen because stored results depend on it.
 - **Coalescence times across independent founders** return the time to the seeding moment,
   a convention rather than a settled answer.
+
+## Changes
+
+Breaking changes between releases are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Tests
 

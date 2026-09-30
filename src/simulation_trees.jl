@@ -62,41 +62,26 @@ end
 """
     celllifetimes(root; excludeliving=true)
 
-Compute the lifetime of every cell in the phylogeny rooted at `root`.
+Compute the lifetime of every cell in the phylogeny rooted at `root`, in pre-order.
 By default, currently alive (leaf) cells are excluded.
 """
-function celllifetimes(root; excludeliving=true)
-    lifetimes = Float64[]
+function celllifetimes(root::BinaryNode; excludeliving::Bool = true)
+    nodes, _ = _preorder(root)
     if excludeliving
-        for cellnode in PreOrderDFS(root)
-            et = endtime(cellnode)
-            if !isnothing(et)
-                push!(lifetimes, et - cellnode.data.birthtime)
-            end
-        end
+        return Float64[endtime(n) - n.data.birthtime for n in nodes if haschildren(n)]
     else
         popage = age(root)
-        for cellnode in PreOrderDFS(root)
-            push!(lifetimes, celllifetime(cellnode, popage))
-        end
+        return Float64[celllifetime(n, popage) for n in nodes]
     end
-    return lifetimes
 end
 
 """
     age(root::BinaryNode)
 
-Return the birthtime of the most recently born leaf cell — the current simulation age.
+Return the birthtime of the most recently born leaf cell, i.e. the time of the last
+division in the tree. This is not `pop.t` if the run ended on a death.
 """
-function age(root::BinaryNode)
-    t = 0.0
-    for cellnode in Leaves(root)
-        if cellnode.data.birthtime > t
-            t = cellnode.data.birthtime
-        end
-    end
-    return t
-end
+age(root::BinaryNode) = maximum(leaf.data.birthtime for leaf in _leaves(root))
 
 """
     age(population::Population)
@@ -105,26 +90,10 @@ Return `population.t`.
 """
 age(population::Population) = population.t
 
-isalive(cellnode::BinaryNode{T}) where T = isalive(cellnode.data)
-isalive(cell::NonMarkovCell) = true
-isalive(::Nothing) = false
-
 """
     getalivecells(root::BinaryNode) -> Vector
 
-Return all alive leaf cells descending from `root`.
+Return all alive leaf cells descending from `root`, in `Leaves(root)` order. Dead cells
+are pruned from the tree, so every leaf is alive.
 """
-getalivecells(root::BinaryNode) =
-    [cellnode for cellnode in Leaves(root) if isalive(cellnode.data)]
-
-"""
-    asroot!(node)
-
-Temporarily detach `node` from its parent by setting `parent = nothing`.
-Returns `(node, original_parent)`.
-"""
-function asroot!(node)
-    parent = node.parent
-    node.parent = nothing
-    return node, parent
-end
+getalivecells(root::BinaryNode) = _leaves(root)

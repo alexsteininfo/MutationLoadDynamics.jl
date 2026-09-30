@@ -7,7 +7,15 @@
     @test cell.id == 1
     @test cell.fitness ≈ 2.0
     @test cell.mutations == 0
+    @test cell.total_mutations == 0
     @test cell.birthtime ≈ 0.0
+end
+
+@testset "initialize_population accepts integer arguments" begin
+    pop = initialize_population(3; fitness_init = 2, time = 1)
+    @test all(c.data.fitness === 2.0 for c in allcells(pop))
+    @test pop.t === 1.0
+    @test_throws ArgumentError initialize_population(0)
 end
 
 @testset "N-cell initialization" begin

@@ -185,7 +185,7 @@ target above the current size is reached on the nose: ask for 10 000 and you get
 crossed it has already fired, so the run exits at ``t \gtrsim T`` — the state is the
 first one at or after ``T``, not the state exactly at ``T``. The overshoot is one
 inter-event interval and shrinks like ``1/N``. If you need the state exactly at ``T``,
-record it with an [`AtTime`](@ref) snapshot trigger instead of stopping there.
+record it with an [`AtTime`](@ref) snapshot trigger, which is exact.
 
 **`pop -> false` runs until the heap empties**, which happens only when the last cell
 dies. Under a supercritical process that is a long wait, and under pure birth
@@ -252,9 +252,12 @@ scale becomes `Inf`.)
     waiting times: a real Gillespie implementation would resample on every rate change,
     and this one does not.
 
-    The honest alternative is to change the *regime* rather than the rate, by chaining:
-    grow to ``K`` under one block, then continue under a second block with ``b = d``.
-    Turnover at constant size is then exact, because neither rate depends on ``N``.
+    The alternative is to change the *regime* rather than the rate, by chaining: grow to
+    ``K`` under one block, then continue under a second block with equal birth and death
+    laws. Neither rate depends on ``N``, so the turnover is simulated exactly, but it is
+    *critical* turnover rather than regulation: ``N`` starts at ``K`` and performs an
+    unbiased random walk whose variance grows with time (and which is eventually absorbed
+    at 0). It holds the size on average, over times short relative to ``K`` generations.
 
 ```julia
 grow = NonMarkovBlock(birth_dist = f -> Gamma(k, 1/(k*b*f)), death_dist = f -> Dirac(Inf),
@@ -263,7 +266,7 @@ hold = NonMarkovBlock(birth_dist = f -> Gamma(k, 1/(k*b*f)), death_dist = f -> G
                       stopfunction = p -> p.t >= t_end, ...)
 
 simulate!(pop, grow, rng)
-simulate!(pop, hold, rng)     # same tree, critical turnover, N fluctuates around K
+simulate!(pop, hold, rng)     # same tree, critical turnover: E[N] stays at K
 ```
 
 ## Extinction and restarting
@@ -272,10 +275,12 @@ simulate!(pop, hold, rng)     # same tree, critical turnover, N fluctuates aroun
 the call begins, and restore that snapshot whenever the population hits zero, retrying
 until a lineage survives to meet the stop condition.
 
-What a restart resets: `cells`, `t`, `_next_id`, the pending event queue, and the
-[`MeasurementAccumulator`](@ref) if one was
-passed — so the trajectory and snapshots describe the successful attempt only. What it
-cannot reset is state owned by your own closures, which is what `on_restart` is for.
+What a restart resets: `cells`, `t`, `_next_id`, the pending event queue, and whatever
+the [`MeasurementAccumulator`](@ref) recorded during this call — so this block's
+trajectory and snapshots describe the successful attempt only, while records from
+earlier chained blocks survive. The restored cells are rescheduled conditioned on their
+age at the restart point, so a restart is exact even on a chained block. What it cannot
+reset is state owned by your own closures, which is what `on_restart` is for.
 
 Three things to know:
 
@@ -286,14 +291,10 @@ Three things to know:
   attempt and cells from the successful one can share ids. The failed tree is dropped, so
   nothing observable collides — but do not cache node ids across a `simulate!` call that
   might restart.
-- **It does not combine with chaining.** The snapshot is taken at the *start of this
-  call*, so restarting a chained second block restores cells that were born under the
-  first block and rewinds them to birthtimes that predate the boundary; their
-  rescheduling then has exactly the age-conditioning defect that
-  [Chaining blocks](#Chaining-blocks) exists to avoid. The snapshot is also a `deepcopy`
-  of a live tree, so on a large chained population it copies the whole history. Use
-  `restart_on_extinction` only on the first block, where the population is small and its
-  birthtimes are the initial ones.
+- **The snapshot is a `deepcopy` of the live tree**, taken at the start of every call
+  with the flag set. `parent` links make that the whole history, so on a large chained
+  population it is expensive; the flag is cheapest on a first block, where the
+  population is small.
 
 For anything more selective than "retry on extinction" — retry because the driver clone
 was lost to drift, say — leave the flag off and write your own loop with a fresh closure
@@ -323,21 +324,21 @@ cannot express: injecting one driver into one cell at one moment, tallying a sta
 incrementally, watching the trajectory of a specific lineage.
 
 It runs **after** both daughters exist and **before** either is scheduled. That ordering
-is load-bearing: `schedule_cell!` reads `node.data.fitness` at push time, so a hook that
+matters: `schedule_cell!` reads `node.data.fitness` at push time, so a hook that
 ran after scheduling would leave a boosted daughter's own first division drawn at its
 pre-boost fitness, and the change would only take effect one generation late.
 
-`NonMarkovCell` is immutable and `BinaryNode` is mutable, so the way to change a daughter
-is to replace its `data` wholesale:
+`NonMarkovCell` is immutable and `BinaryNode` is mutable. Change a daughter's fitness
+with [`set_fitness!`](@ref), which replaces the node's cell with an identical one of the
+new fitness:
 
 ```julia
-c = d1.data
-d1.data = NonMarkovCell(c.id, c.birthtime, c.mutations, 1.0 + s)
+set_fitness!(d1, 1.0 + s)
 ```
 
-The new fitness propagates to every descendant automatically, because `_make_daughter`
-reads the parent node's fitness at division time. **Do not change `id`** — ids key
-`population.cells`.
+The new fitness propagates to every descendant automatically, because daughters read
+their parent's fitness at division time. Do not build a replacement cell by hand: ids
+key `population.cells`, and `total_mutations` must stay consistent along the lineage.
 
 !!! note "`popsize` inside the hook is the post-division size"
     `celldivision!` has already removed the parent and inserted both daughters, so a
@@ -362,8 +363,7 @@ block = NonMarkovBlock(
         injected[] && return nothing
         popsize(pop) == N_critic + 1 || return nothing
         injected[] = true
-        c = d1.data
-        d1.data = NonMarkovCell(c.id, c.birthtime, c.mutations, 1.0 + s)
+        set_fitness!(d1, 1.0 + s)
         return nothing
     end,
 )
@@ -403,15 +403,12 @@ simulate!(pop, neutral_block, rng)     # ν = 0.0, grow to 5 000 — same tree
 The queue of already-drawn, not-yet-fired events is carried on the population and
 **reused**, not redrawn.
 
-That is the whole subtlety, and it matters for any non-exponential waiting time. Cells
-alive at the boundary have already survived part of a cell cycle without an event.
-Redrawing would anchor each of them at its `birthtime` and ignore that accumulated age;
-the correct law is the conditional ``T \mid T > \text{age}``, and drawing
-unconditionally both loses the conditioning and places some events *before* the current
-`pop.t`, running the clock backwards. Carrying the queue sidesteps the problem exactly:
-each cell simply keeps the event it had already committed to. A chained run is then
-identical draw-for-draw to the equivalent uninterrupted one, which the test suite asserts
-bit for bit.
+That matters for any non-exponential waiting time. Cells alive at the boundary have
+already survived part of a cell cycle without an event, so their next event follows the
+conditional law ``T \mid T > \text{age}``, not the law from birth. Carrying the queue
+respects this trivially — each cell keeps the event it had already committed to — and
+makes a chained run identical draw for draw to the equivalent uninterrupted one, which
+the test suite asserts bit for bit.
 
 The consequence to plan around:
 
@@ -431,8 +428,14 @@ reset_schedule!(pop)
 simulate!(pop, second_block, rng)
 ```
 
-But this reintroduces the age-conditioning error above, so it is only sound when every
-living cell has just been born — a freshly initialised population, essentially. Its real
-purpose is recovery: if you add or remove entries in `pop.cells` by hand, the queue no
-longer matches the population, and `simulate!` throws naming both counts rather than
-running with a corrupt heap. `reset_schedule!` is the documented way back.
+The redraw is exact: each cell's new event is drawn by rejection from the new block's
+distributions, conditioned on nothing having happened to the cell before `pop.t`. Use it
+when a change of `birth_dist` or `death_dist` must take effect for every cell at once.
+The cost is extra draws for old cells, and the run no longer matches an uninterrupted
+one draw for draw. If a cell is so old that the new law almost surely would have ended
+it already (for example a `Dirac` clock it has outlived), `simulate!` raises an error
+rather than looping.
+
+`reset_schedule!` is also the recovery after adding or removing entries in `pop.cells`
+by hand: the queue then no longer matches the population, and `simulate!` throws naming
+both counts rather than running with a corrupt heap.

@@ -1,31 +1,8 @@
-# Both helpers must be defined at the TOP of this file, above every @testset.
-# A `@testset` body executes eagerly while the file is being evaluated, so a
-# testset that calls a function defined further down raises UndefVarError.
-#
-# Same fixture as test/statistics.jl. Duplicated deliberately: each test file must
-# run standalone under `include`, and the tree is five lines.
-function sampling_fixture()
-    root = BinaryNode(NonMarkovCell(1, 0.0, 5, 1.0))
-    L = leftchild!(root,  NonMarkovCell(2, 1.0, 1, 1.0))
-    rightchild!(root,     NonMarkovCell(3, 1.2, 7, 1.0))
-    leftchild!(L,         NonMarkovCell(4, 2.0, 2, 1.0))
-    rightchild!(L,        NonMarkovCell(5, 2.1, 3, 1.0))
-    return root
-end
+@isdefined(fixture_tree) || include("fixtures.jl")
 
-function simple_sampling_pop(; Nmax = 60, ν = 2.0, rng = MersenneTwister(11))
-    block = NonMarkovBlock(
-        birth_dist     = f -> Gamma(2.0, 1.0 / f),
-        death_dist     = f -> Gamma(2.0, 20.0),
-        stopfunction   = pop -> popsize(pop) >= Nmax,
-        driver_dist    = Exponential(0.1),
-        fitness_update = (f, δ) -> f + δ,
-        ν              = ν,
-    )
-    pop = initialize_population(fitness_init = 1.0)
-    simulate!(pop, block, rng)
-    return pop
-end
+sampling_fixture() = fixture_tree()
+simple_sampling_pop(; Nmax = 60, ν = 2.0, rng = MersenneTwister(11)) =
+    grown_population(; Nmax = Nmax, ν = ν, rng = rng)
 
 @testset "LeafSample records the draw" begin
     root = sampling_fixture()
@@ -40,49 +17,38 @@ end
     @test all(id -> id in (3, 4, 5), s.sampled_ids)
 end
 
-@testset "GOLDEN: the draw recipe is frozen (HR-1)" begin
-    # These ids are the output of MersenneTwister(seed) + randperm(rng, 3)[1:n]
-    # over Leaves order [4, 5, 3]. 4.2 GB of sampled trees on disk were drawn with
-    # this exact recipe. If this test fails, the recipe changed and the stored data
-    # is no longer reproducible — do NOT update the expected values, fix the code.
-    # Generated under Julia 1.12.1; treat a change of Julia minor version as a
-    # reason to re-verify against real shards rather than to edit this test.
-    root = sampling_fixture()
-    leaves = [l.data.id for l in Leaves(root)]
-    for (seed, n) in ((UInt64(1), 1), (UInt64(1), 2), (UInt64(42), 2), (UInt64(7), 3))
-        rng      = MersenneTwister(seed)
-        expected = leaves[randperm(rng, 3)[1:n]]
-        @test sample_leaves(root, n; seed = seed).sampled_ids == expected
+@testset "GOLDEN: the draw recipe (StableRNG + partial Fisher–Yates over Leaves order)" begin
+    # Re-derives the recipe independently of the package code. Stored samples depend on
+    # it; if this fails, the recipe changed.
+    function reference_draw(root, n, seed)
+        leaves = [l.data.id for l in Leaves(root)]
+        rng, perm = StableRNG(seed), collect(1:length(leaves))
+        for i in 1:n
+            j = rand(rng, i:length(leaves))
+            perm[i], perm[j] = perm[j], perm[i]
+        end
+        return leaves[perm[1:n]]
     end
+    root = sampling_fixture()
+    for (seed, n) in ((UInt64(1), 1), (UInt64(1), 2), (UInt64(42), 2), (UInt64(7), 3))
+        @test sample_leaves(root, n; seed = seed).sampled_ids == reference_draw(root, n, seed)
+    end
+    pop = simple_sampling_pop(Nmax = 120)
+    @test sample_leaves(pop, 30; seed = UInt64(99)).sampled_ids ==
+          reference_draw(getsingleroot(allcells(pop)), 30, UInt64(99))
 end
 
-@testset "GOLDEN LITERALS: frozen draw output (HR-1)" begin
-    # Captured once from a passing run under Julia 1.12.1 and FROZEN. These are
-    # literal expected values, not a re-derivation of the recipe — that is the
-    # point. If this testset fails, the draw recipe changed and every serialized
-    # sampled tree on disk became unreproducible. Fix the code; never edit these
-    # numbers to match new behaviour.
-    #
-    # The companion "GOLDEN" testset above re-derives the recipe and catches a
-    # different class of change (a wrong RNG or sampler). Keep both.
-    #
-    # Julia changed the algorithm behind `rand`/`randperm` range sampling in 1.11 (the CI
-    # floor is 1.9), so a `MersenneTwister` seed does not reproduce the same draws across
-    # that boundary. These literals are only meaningful on the Julia line they were
-    # captured on, so they are skipped below 1.11 rather than pinned to a stream that
-    # cannot match.
+@testset "GOLDEN LITERALS: frozen draw output and seed derivation" begin
+    # Literal values, stable across Julia versions by construction (StableRNG and an
+    # explicit splitmix64 mix). Never edit these to match new behaviour: a failure means
+    # stored samples can no longer be reproduced.
     root = sampling_fixture()
-    if VERSION >= v"1.11"
-        @test sample_leaves(root, 1; seed = UInt64(1)).sampled_ids  == Int64[3]
-        @test sample_leaves(root, 2; seed = UInt64(1)).sampled_ids  == Int64[3, 5]
-        @test sample_leaves(root, 2; seed = UInt64(42)).sampled_ids == Int64[5, 3]
-        @test sample_leaves(root, 3; seed = UInt64(7)).sampled_ids  == Int64[5, 3, 4]
-    else
-        @test_skip sample_leaves(root, 1; seed = UInt64(1)).sampled_ids  == Int64[3]
-        @test_skip sample_leaves(root, 2; seed = UInt64(1)).sampled_ids  == Int64[3, 5]
-        @test_skip sample_leaves(root, 2; seed = UInt64(42)).sampled_ids == Int64[5, 3]
-        @test_skip sample_leaves(root, 3; seed = UInt64(7)).sampled_ids  == Int64[5, 3, 4]
-    end
+    @test sample_leaves(root, 1; seed = UInt64(1)).sampled_ids  == Int64[3]
+    @test sample_leaves(root, 2; seed = UInt64(1)).sampled_ids  == Int64[3, 5]
+    @test sample_leaves(root, 2; seed = UInt64(42)).sampled_ids == Int64[5, 4]
+    @test sample_leaves(root, 3; seed = UInt64(7)).sampled_ids  == Int64[5, 4, 3]
+    @test MutationLoadDynamics._draw_seed(UInt64(0xBEEF), 1000, 1) == 0x951c6c7fdc8c2e70
+    @test MutationLoadDynamics._draw_seed(UInt64(1), 2, 3)         == 0xd0734750fde362b3
 end
 
 @testset "n = N_full reproduces the source tree exactly" begin
@@ -102,16 +68,15 @@ end
     @test a.sampled_ids == b.sampled_ids
 end
 
-@testset "sample_leaves errors on out-of-range n (HR-8)" begin
+@testset "sample_leaves errors on out-of-range n" begin
     root = sampling_fixture()
     @test_throws ArgumentError sample_leaves(root, 0; seed = UInt64(1))
     @test_throws ArgumentError sample_leaves(root, 4; seed = UInt64(1))
 end
 
-@testset "sample_leaves on a single-node tree (M-4)" begin
-    # The bounds test the spec (§5) called for but the suite never got: a tree
-    # with exactly one leaf, which is also its own root.
-    root = BinaryNode(NonMarkovCell(1, 0.0, 0, 1.0))
+@testset "sample_leaves on a single-node tree" begin
+    # A tree with exactly one leaf, which is also its own root.
+    root = rootnode(1, 0.0, 0)
     s = sample_leaves(root, 1; seed = UInt64(1))
     @test s.sampled_ids == Int64[1]
     @test s.N_full == 1
@@ -125,38 +90,6 @@ end
     @test s.N_full == popsize(pop)
     @test s.n == 10
     @test all(id -> haskey(pop.cells, id), s.sampled_ids)
-end
-
-# ── Id-keyed reference maps ───────────────────────────────────────────────────
-# leaf_depths is not co-indexed with anything, so comparing a sample cell-by-cell
-# against the full tree needs id keys.
-function id_depth_map(root::BinaryNode{NonMarkovCell})
-    m = Dict{Int64, Int}()
-    stack = Tuple{BinaryNode{NonMarkovCell}, Int}[(root, 0)]
-    while !isempty(stack)
-        node, d = pop!(stack)
-        if isnothing(node.left) && isnothing(node.right)
-            m[node.data.id] = d
-        else
-            isnothing(node.left)  || push!(stack, (node.left,  d + 1))
-            isnothing(node.right) || push!(stack, (node.right, d + 1))
-        end
-    end
-    return m
-end
-
-function id_burden_map(root::BinaryNode{NonMarkovCell})
-    m = Dict{Int64, Int}()
-    for leaf in Leaves(root)
-        muts = leaf.data.mutations
-        node = leaf
-        while !isnothing(node.parent)
-            node = node.parent
-            muts += node.data.mutations
-        end
-        m[leaf.data.id] = muts
-    end
-    return m
 end
 
 @testset "INVARIANCE: burden and depth are the cell's full-tree values" begin
@@ -228,7 +161,7 @@ end
     @test found
 end
 
-@testset "left/right slots are preserved, not re-balanced (HR-4)" begin
+@testset "left/right slots are preserved, not re-balanced" begin
     root  = sampling_fixture()
     found = false
     for seed in UInt64(1):UInt64(200)
@@ -246,7 +179,7 @@ end
     @test found
 end
 
-@testset "parent links are consistent (HR-4)" begin
+@testset "parent links are consistent" begin
     pop  = simple_sampling_pop(Nmax = 80)
     root = getsingleroot(allcells(pop))
     s = sample_leaves(root, 20; seed = UInt64(9))
@@ -257,7 +190,7 @@ end
     end
 end
 
-@testset "the source tree is never mutated (HR-3)" begin
+@testset "the source tree is never mutated" begin
     root   = sampling_fixture()
     before = (mutations_per_cell(root), leaf_depths(root),
               sitefrequencyspectrum(root, 3), [l.data.id for l in Leaves(root)])
@@ -269,7 +202,7 @@ end
            [l.data.id for l in Leaves(root)]) == before
 end
 
-@testset "node data is shared, not copied (HR-5)" begin
+@testset "node data is shared, not copied" begin
     root = sampling_fixture()
     s = sample_leaves(root, 3; seed = UInt64(1))
     src = Dict(l.data.id => l.data for l in Leaves(root))
@@ -278,14 +211,13 @@ end
     end
 end
 
-@testset "draws at different n and different seeds are independent" begin
-    root = sampling_fixture()
-    a = sample_leaves(root, 2; seed = UInt64(42))
-    c = sample_leaves(root, 2; seed = UInt64(2))
-    @test a.sampled_ids != c.sampled_ids   # different seeds, different draw
-    # A draw at n = 1 is not merely the first element of the n = 2 draw's ids
-    # reversed or truncated in some coupled way — it is its own permutation.
-    @test sample_leaves(root, 1; seed = UInt64(42)).sampled_ids == a.sampled_ids[1:1]
+@testset "different seeds differ; one seed gives nested draws across n" begin
+    pop = simple_sampling_pop(Nmax = 100)
+    a = sample_leaves(pop, 10; seed = UInt64(42))
+    c = sample_leaves(pop, 10; seed = UInt64(2))
+    @test a.sampled_ids != c.sampled_ids
+    # Documented coupling: for one seed, the n-draw is a prefix of any larger draw.
+    @test sample_leaves(pop, 4; seed = UInt64(42)).sampled_ids == a.sampled_ids[1:4]
 end
 
 @testset "SFS of a sample sums to the sample's total burden" begin
@@ -294,7 +226,7 @@ end
     for n in (1, 10, 150)
         s   = sample_leaves(root, n; seed = UInt64(100 + n))
         sfs = sitefrequencyspectrum(s.root, n)
-        @test sum(k * sfs[k] for k in 1:n) == sum(mutations_per_cell(s.root))
+        @test sum(k * sfs[k] for k in 1:n) == sum(mutations_per_cell(s.root; includeclonal = true))
     end
 end
 
@@ -427,12 +359,12 @@ end
     end
 end
 
-@testset "sampling a forest is rejected by name (HR-8)" begin
+@testset "sampling a forest is rejected by name" begin
     # Two independent founders: getsingleroot returns nothing, and both the
     # single-draw and the spec-driven entry points must say so rather than
     # silently sampling one tree of the forest.
     pop = initialize_population(fitness_init = 1.0)
-    second = BinaryNode(NonMarkovCell(pop._next_id + 1, 0.0, 0, 1.0))
+    second = rootnode(pop._next_id + 1, 0.0, 0)
     pop.cells[second.data.id] = second
     pop._next_id += 1
 

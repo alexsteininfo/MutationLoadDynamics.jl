@@ -92,8 +92,7 @@ end
         if !isnothing(node.parent)
             @test node.data.birthtime >= node.parent.data.birthtime
         end
-        lt = celllifetime(node)
-        isnothing(lt) || @test lt >= 0.0
+        @test celllifetime(node) >= 0.0
     end
     @test all(c.data.birthtime <= pop.t for c in allcells(pop))
 end
@@ -163,8 +162,78 @@ end
     @test isnothing(pop._pending)
     @test isnothing(initialize_population(5)._pending)
     # The pre-existing three-argument positional constructor still works.
-    cells = Dict{Int64, BinaryNode{NonMarkovCell}}(1 => BinaryNode(NonMarkovCell(1, 0.0, 0, 1.0)))
+    cells = Dict{Int64, BinaryNode{NonMarkovCell}}(1 => rootnode(1, 0.0, 0))
     manual = Population(cells, 0.0, 1)
     @test isnothing(manual._pending)
     @test popsize(manual) == 1
+end
+
+# ── Fresh schedules are conditioned on each cell's age ────────────────────────
+
+@testset "a redrawn schedule never fires in the past" begin
+    # Cells born at t = 0 but scheduled at t = 2: each must be conditioned on having had
+    # no event before t = 2, so no event may land earlier.
+    times = Float64[]
+    block = NonMarkovBlock(
+        birth_dist     = f -> Gamma(5.0, 1.0 / (5.0 * f)),
+        death_dist     = f -> Exponential(4.0),
+        stopfunction   = pop -> popsize(pop) >= 200,
+        driver_dist    = Dirac(0.0),
+        fitness_update = (f, δ) -> f,
+        ν              = 0.0,
+        on_division    = (pop, parent, d1, d2) -> (push!(times, pop.t); nothing),
+    )
+    pop = initialize_population(50)
+    pop.t = 2.0
+    simulate!(pop, block, MersenneTwister(12))
+    @test !isempty(times)
+    @test minimum(times) >= 2.0
+    @test issorted(times)
+end
+
+@testset "conditioning is exact: residual time of an aged exponential cell" begin
+    # Memorylessness: an Exponential(1) cell of age 3 has residual time ~ Exponential(1),
+    # so the conditioned event time minus 3 must have mean ≈ 1.
+    heap = DataStructures.BinaryMinHeap{MutationLoadDynamics.CellEvent}()
+    node = rootnode(1, 0.0, 0)
+    block = NonMarkovBlock(birth_dist = f -> Exponential(1.0), death_dist = f -> Dirac(Inf),
+        stopfunction = pop -> false, driver_dist = Dirac(0.0),
+        fitness_update = (f, δ) -> f, ν = 0.0)
+    rng = MersenneTwister(3)
+    residuals = Float64[]
+    for _ in 1:4000
+        MutationLoadDynamics.schedule_cell!(heap, node, block, rng, 3.0)
+        push!(residuals, pop!(heap).time - 3.0)
+    end
+    @test all(>=(0), residuals)
+    @test abs(mean(residuals) - 1.0) < 0.06
+end
+
+@testset "a cell too old for its waiting times raises instead of hanging" begin
+    pop = initialize_population()
+    pop.t = 5.0                                   # born at 0, would have divided at 1
+    block = NonMarkovBlock(birth_dist = f -> Dirac(1.0), death_dist = f -> Dirac(Inf),
+        stopfunction = pop -> popsize(pop) >= 4, driver_dist = Dirac(0.0),
+        fitness_update = (f, δ) -> f, ν = 0.0)
+    @test_throws ErrorException simulate!(pop, block, MersenneTwister(1))
+end
+
+@testset "restart_on_extinction now works on a chained block" begin
+    times = Float64[]
+    watcher = (pop, parent, d1, d2) -> (push!(times, pop.t); nothing)
+    grow = NonMarkovBlock(birth_dist = f -> Gamma(5.0, 0.2), death_dist = f -> Dirac(Inf),
+        stopfunction = pop -> popsize(pop) >= 3, driver_dist = Dirac(0.0),
+        fitness_update = (f, δ) -> f, ν = 0.0)
+    risky = NonMarkovBlock(birth_dist = f -> Exponential(1.0),
+        death_dist = f -> Exponential(0.9),       # near-critical: extinction is common
+        stopfunction = pop -> popsize(pop) >= 40, driver_dist = Dirac(0.0),
+        fitness_update = (f, δ) -> f, ν = 0.0, restart_on_extinction = true,
+        on_division = watcher)
+    pop = initialize_population()
+    rng = MersenneTwister(21)
+    simulate!(pop, grow, rng)
+    boundary = pop.t
+    simulate!(pop, risky, rng)
+    @test popsize(pop) >= 40
+    @test all(>=(boundary), times)           # restored cells never fire before the boundary
 end

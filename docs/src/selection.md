@@ -248,10 +248,13 @@ free of the floor problem.
 The three interact, and it is easy to pick a corner of parameter space where nothing
 interesting happens.
 
-- **``ν`` sets how many drivers a cell has by the time the run ends**, which is roughly
-  ``2ν`` times its divisional depth. Growing to ``N = 10^4`` from one cell means a depth
-  of order ``\log_2 N \approx 13``, so ``ν = 0.2`` gives about 5 drivers per cell. Below
-  ``ν \approx 0.01`` most cells carry none and the run is neutral in all but name.
+- **``ν`` sets how many drivers a cell has by the time the run ends**, which is on
+  average ``ν`` times its divisional depth: the cell is a daughter once per division on
+  its path, and each time draws ``\mathrm{Poisson}(ν)``. Growing to ``N = 10^4`` from one
+  cell gives depths between ``\log_2 N \approx 13`` (near-synchronous division) and
+  ``2 \ln N \approx 18`` (exponential timing), more with death, so ``ν = 0.2`` gives
+  about 3–4 drivers per cell. Below ``ν \approx 0.01`` most cells carry none and the run
+  is neutral in all but name.
 - **``s`` and ``ν`` trade off.** What drives the fitness distribution is the product ``νs``
   (per-division expected gain), so a sweep over ``s`` at fixed ``ν`` and a sweep over
   ``ν`` at fixed ``s`` explore much the same axis — until a non-linear

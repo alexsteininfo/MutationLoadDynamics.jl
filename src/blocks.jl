@@ -33,17 +33,10 @@ called once per birth event, *after* the two daughters exist and *before* either
 scheduled, so a fitness change applies to the boosted daughter's own first division
 rather than only to its descendants.
 
-Because `NonMarkovCell` is immutable while `BinaryNode` is mutable, the supported way to
-change a daughter is to replace its `data`:
-
-```julia
-c = d1.data
-d1.data = NonMarkovCell(c.id, c.birthtime, c.mutations, 1.0 + s)
-```
-
-The new fitness propagates to all future descendants automatically, since `_make_daughter`
-reads `parent_node.data.fitness`. Changing `id` is **not** supported — ids key
-`population.cells`.
+Change a daughter's fitness with [`set_fitness!`](@ref)`(d1, 1.0 + s)`. The new fitness
+propagates to all future descendants automatically. Do not replace `d1.data` with a cell
+of a different `id` or mutation count: ids key `population.cells`, and
+`total_mutations` must stay consistent along the lineage.
 
 Note that `celldivision!` removes the parent and inserts both daughters before the hook
 runs, so inside the callback `popsize(pop)` is the pre-division size **+ 1**. To inject at
@@ -54,8 +47,9 @@ the simulation's `rng` if seed reproducibility matters.
 
 # Restart hook
 
-On restart the package resets `cells`, `t`, `_next_id` and the pending event queue, but it
-cannot reset state owned by your closure. A hook holding an `injected::Ref{Bool}` flag
+On restart the package resets `cells`, `t`, `_next_id`, the pending event queue and what
+the accumulator recorded during this call, but it cannot reset state owned by your
+closure. A hook holding an `injected::Ref{Bool}` flag
 would therefore silently fail to inject on the second attempt. Use `on_restart` to reset
 that state:
 
@@ -71,8 +65,8 @@ criteria (e.g. loss of the driver clone to drift).
 # Example
 ```julia
 block = NonMarkovBlock(
-    birth_dist  = f -> Gamma(2.0, 1.0 / f),
-    death_dist  = f -> Gamma(2.0, 5.0),
+    birth_dist  = f -> Gamma(5.0, 1.0 / (5.0 * f)),   # mean 1/f, CV 1/√5
+    death_dist  = f -> Gamma(5.0, 1.0 / (5.0 * 0.2)), # mean 5
     stopfunction = pop -> popsize(pop) >= 10_000,
     driver_dist = Exponential(0.05),
     fitness_update = (f, δ) -> f + δ,
@@ -96,8 +90,7 @@ block = NonMarkovBlock(
         injected[] && return nothing
         popsize(pop) == N_critic + 1 || return nothing
         injected[] = true
-        c = d1.data
-        d1.data = NonMarkovCell(c.id, c.birthtime, c.mutations, 1.0 + s)
+        set_fitness!(d1, 1.0 + s)
         return nothing
     end,
 )

@@ -3,25 +3,26 @@
 ## A cell is a node in a binary tree
 
 The unit of state is a [`NonMarkovCell`](@ref), carried as the `data` of a
-[`BinaryNode`](@ref). It is immutable and holds four numbers:
+[`BinaryNode`](@ref). It is immutable and holds five numbers:
 
 | Field | Symbol | Meaning |
 |:---|:---|:---|
 | `id::Int64` | — | unique identifier, allocated in order of creation |
 | `birthtime::Float64` | ``t_0`` | absolute simulation time at which this cell was born |
 | `mutations::Int64` | ``j`` | driver mutations acquired **at this cell's own birth** |
+| `total_mutations::Int64` | ``K`` | drivers on the whole path from the root, including ``j`` |
 | `fitness::Float64` | ``f`` | the cell's fitness, inherited and then updated per mutation |
 
-The asymmetry between the last two fields is the one thing to internalise, because every
-statistic in the package follows from it.
-
 `mutations` is **local**: it is the Poisson draw made when this particular cell was
-born, and nothing else. A cell's total mutational burden is the sum of `mutations` over
-its whole ancestral path, which is what [`mutations_per_cell`](@ref) computes by walking
-to the root. Storing it locally rather than cumulatively is what makes a
-site-frequency spectrum a single traversal: a mutation event sitting on one node is
-carried by exactly the leaves below that node, so one post-order pass assigns every
-event to a frequency class.
+born, and nothing else. That is what makes a site-frequency spectrum a single
+traversal: a mutation event sitting on one node is carried by exactly the leaves below
+that node, so one post-order pass assigns every event to a frequency class.
+
+`total_mutations` is the cell's whole burden, the parent's total plus its own
+`mutations`. It is stored so that [`mutations_per_cell`](@ref), trajectory recording and
+pairwise distances read a field instead of walking to the root. A hand-built tree must
+keep it consistent; an `on_division` hook should change a cell only through
+[`set_fitness!`](@ref).
 
 `fitness` is **cumulative**: it is the parent's fitness with `fitness_update` applied
 once per new mutation, stored outright. That makes the quantity the waiting-time
@@ -120,8 +121,9 @@ changes — the population size, a neighbouring clone, a treatment. Density-depe
 rules can be written, but they are frozen as of each cell's birth; see
 [Density-dependent and homeostatic growth](blocks.md#Density-dependent-and-homeostatic-growth).
 
-**Every scheduling consumes two draws.** Both `T_div` and `T_die` come off the rng even
-when one is certain to lose, so the random stream depends on the shape of the model, not
+**Both waiting times are always drawn.** `T_div` and `T_die` are both evaluated even
+when one is certain to lose (a `Dirac` consumes no random numbers, every other family
+does), so the random stream depends on the shape of the model, not
 only on its outcomes. Two runs are draw-for-draw identical only when the distributions
 are identical too — see [Reproducibility](#Reproducibility) below.
 
@@ -197,9 +199,20 @@ Gamma** — a Gamma convolved with an exponential, where the exponential capture
 stochastic G1 restriction-point wait and the Gamma the more deterministic S/G2/M phases.
 It outperforms the plain Gamma across 77 published datasets and 16 cell types (Golubev
 2016). Nothing in this package prevents you from using it: `birth_dist` returns any
-`Distribution`, so a convolution is `f -> Gamma(k, θ(f)) + Exponential(λ)` if you supply
-the sampler. The Gamma is offered as the tractable default, not as a claim about
-biology.
+`Distribution`, and the simulator only ever calls `rand(rng, d)` on it. Distributions.jl
+has no built-in sum of a Gamma and an exponential, but a sampler is three lines:
+
+```julia
+struct ExpModGamma <: ContinuousUnivariateDistribution
+    k::Float64; θ::Float64; λ::Float64       # Gamma shape and scale, exponential mean
+end
+Base.rand(rng::AbstractRNG, d::ExpModGamma) =
+    rand(rng, Gamma(d.k, d.θ)) + rand(rng, Exponential(d.λ))
+
+birth_dist = f -> ExpModGamma(k, θ / f, λ / f)
+```
+
+The Gamma is offered as the tractable default, not as a claim about biology.
 
 !!! note "\"Mean equals variance\" is not a simplification here"
     Imposing ``\mathrm{Var}[T] = \mathbb{E}[T]`` on a Gamma forces ``k\theta^2 = k\theta``,
@@ -255,6 +268,16 @@ shifts everything after it, so the following are worth knowing:
   one therefore shifts the stream, on top of changing the model.
 - Both waiting times are always drawn, even when the death distribution is
   `Dirac(Inf)`.
+- A fresh schedule (a new population, [`reset_schedule!`](@ref), an extinction restart)
+  visits cells in increasing id order. A cell older than zero at that moment may need
+  several pairs of draws, because its next event is conditioned on nothing having
+  happened to it yet.
+
+**Across Julia versions.** A seed reproduces a run only on the same Julia and
+Distributions.jl versions: `MersenneTwister` streams and several samplers have changed
+between releases. Passing a `StableRNG` from StableRNGs.jl removes the first source of
+drift but not the second. Leaf sampling is the exception: it depends only on
+`StableRNG` and is stable across versions (see [Sampling](sampling.md)).
 
 The package holds no global mutable state. One population, one block and one closure per
 simulation is safe to run under `Threads.@threads`, provided each thread has its own

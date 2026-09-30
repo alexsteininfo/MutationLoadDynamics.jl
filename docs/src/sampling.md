@@ -10,7 +10,7 @@ out = sample_trees(pop, SamplingSpec([1000, 100]); seed = UInt64(0xBEEF))
 out.full                              # the whole tree, still there
 s = out.samples[1]                    # a LeafSample: n = 1000
 sitefrequencyspectrum(s.root, s.n)    # the sample's SFS
-mutations_per_cell(s.root)            # each sampled cell's FULL-TREE burden
+mutations_per_cell(s.root; includeclonal = true)   # each sampled cell's FULL-TREE burden
 leaf_depths(s.root)                   # each sampled cell's FULL-TREE depth
 ```
 
@@ -38,17 +38,19 @@ returns the induced tree as a [`LeafSample`](@ref):
 | `sampled_ids` | `NonMarkovCell.id` of each drawn cell, in draw order |
 
 It is **non-destructive** — the source tree is untouched, because the same tree is
-normally drawn from again at other sizes and those draws must be independent. Cost is
-proportional to the number of *retained* nodes, not to the size of the source tree.
+normally drawn from again at other sizes. Cost is one pass over the source tree's leaves
+plus the number of retained nodes; [`sample_trees`](@ref) lists the leaves once for all
+its draws.
 
 ## Prune, do not collapse
 
 The induced tree keeps the sampled leaves **plus every ancestor of a sampled leaf**, and
 retains the resulting unary nodes rather than merging them into their children.
 
-This is the load-bearing decision of the whole module. Because every division ancestral to
-a sampled cell is still a node, a sampled cell's root-to-leaf path is unchanged — so
-[`mutations_per_cell`](@ref) and [`leaf_depths`](@ref) on the sampled tree return exactly
+This is the central decision of the module. Because every division ancestral to a sampled
+cell is still a node, a sampled cell's root-to-leaf path is unchanged — so
+[`mutations_per_cell`](@ref)`(s.root; includeclonal = true)` and [`leaf_depths`](@ref) on
+the sampled tree return exactly
 that cell's **full-tree** burden and divisional depth. Collapsing would turn depth into a
 count of bifurcations that happened to survive sampling, which is a property of the
 sample rather than of the cell.
@@ -133,17 +135,23 @@ Callers supply the seed because they are the ones who can derive it from their o
 provenance: a filename stem, a simulation index, a sweep coordinate. Two draws that
 should differ must be given different seeds. `sample_trees` handles this for you inside
 one batch, deriving a distinct per-draw seed from the base seed, the size and the
-replicate index.
+replicate index, with an explicit splitmix64 mix rather than `Base.hash`, so the derived
+seeds are the same on every Julia version.
 
-Each call builds its own `MersenneTwister` from the seed and touches no shared state, so
+Each call builds its own `StableRNG` from the seed and touches no shared state, so
 independent draws are safe to run concurrently from your own threads.
 
+For one seed, draws at different `n` are **nested**: the `n = 10` draw is the first 10
+cells of the `n = 100` draw. That is harmless within `sample_trees`, whose per-draw seeds
+differ by size, but pass different seeds yourself if you need independent draws at
+several sizes.
+
 !!! warning "The draw recipe is frozen"
-    `MersenneTwister(seed)` and `randperm(rng, N_full)[1:n]` over `Leaves(root)` order are
-    load-bearing, not incidental: serialised sampled trees produced by earlier runs must
-    stay reproducible. A golden test pins them. Do not substitute a different rng,
-    `StatsBase.sample`, or a direct `n`-index draw — each would silently invalidate
-    stored results.
+    `StableRNG(seed)` driving a partial Fisher–Yates shuffle (`rand(rng, i:N)` for
+    `i = 1:n`) over `Leaves(root)` order. StableRNGs.jl guarantees that stream across
+    Julia and package versions, so a stored seed reproduces its draw everywhere. Golden
+    tests pin both the draw and the seed derivation. Changing either invalidates stored
+    samples.
 
 ## Sampling needs a single-rooted tree
 
@@ -166,12 +174,17 @@ samples = [sample_leaves(r, min(100, popsize(r)); seed = UInt64(i))
 ```julia
 using MutationLoadDynamics, Distributions, Random, Serialization
 
+block(s) = NonMarkovBlock(
+    birth_dist = f -> Gamma(5.0, 1 / (5 * f)), death_dist = f -> Exponential(1 / 0.3),
+    stopfunction = pop -> popsize(pop) >= 100_000, driver_dist = Dirac(s),
+    fitness_update = (f, δ) -> f + δ, ν = 0.2, restart_on_extinction = true)
+
 for (i, s) in enumerate(0.0:0.1:0.5)
     pop = initialize_population(fitness_init = 1.0)
     simulate!(pop, block(s), MersenneTwister(i))
 
     out = sample_trees(pop, SamplingSpec(sizes = [1000, 100], replicates = 10),
-                       seed = hash(("sweep-2026-09", i)))
+                       seed = UInt64(20260930 + i))   # any provenance you record
 
     serialize("s=$(s).jls", out.samples)   # small: the samples, not the population
     pop = nothing

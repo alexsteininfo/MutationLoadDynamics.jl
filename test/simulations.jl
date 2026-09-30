@@ -93,6 +93,26 @@ end
     @test popsize(pop) >= 10
 end
 
+@testset "set_fitness! keeps everything but fitness" begin
+    node = rootnode(7, 0.5, 3, 1.0)
+    before = node.data
+    @test set_fitness!(node, 2) === node
+    @test node.data.fitness === 2.0
+    @test (node.data.id, node.data.birthtime, node.data.mutations, node.data.total_mutations) ==
+          (before.id, before.birthtime, before.mutations, before.total_mutations)
+end
+
+@testset "daughters carry a consistent total_mutations" begin
+    pop  = initialize_population()
+    simulate!(pop, make_block(Nmax = 200, ν = 1.5), MersenneTwister(8))
+    root = getsingleroot(allcells(pop))
+    for node in PreOrderDFS(root)
+        expected = node.data.mutations +
+                   (isnothing(node.parent) ? 0 : node.parent.data.total_mutations)
+        @test node.data.total_mutations == expected
+    end
+end
+
 @testset "trajectory recording" begin
     rng = MersenneTwister(42)
     spec = MeasurementSpec(
@@ -171,8 +191,7 @@ end
         ν              = 0.0,
         on_division    = function (pop, parent, d1, d2)
             isnothing(boosted[]) || return nothing
-            c = d1.data
-            d1.data   = NonMarkovCell(c.id, c.birthtime, c.mutations, 2.0)
+            set_fitness!(d1, 2.0)
             boosted[] = d1
             return nothing
         end,
@@ -203,8 +222,7 @@ end
             injected[] && return nothing
             popsize(pop) == N_critic + 1 || return nothing
             injected[] = true
-            c = d1.data
-            d1.data = NonMarkovCell(c.id, c.birthtime, c.mutations, 1.5)
+            set_fitness!(d1, 1.5)
             root_of_clade[] = d1
             return nothing
         end,
@@ -237,8 +255,7 @@ end
                 injected[] && return nothing
                 popsize(pop) == N_critic + 1 || return nothing
                 injected[] = true
-                c = d1.data
-                d1.data  = NonMarkovCell(c.id, c.birthtime, c.mutations, 1.0 + s)
+                set_fitness!(d1, 1.0 + s)
                 clade[]  = d1
                 return nothing
             end,
@@ -261,10 +278,8 @@ end
     # attempt that later goes extinct, and never inject again. `on_restart` resets it.
     # Seed 4 is chosen because it does exactly that: it injects, dies, and restarts.
     #
-    # That narrative is a property of seed 4 under Julia's post-1.11 `rand`/randperm-style
-    # range-sampling algorithm (the CI floor is 1.9, which predates that change and does not
-    # reproduce the same draws from this seed), so the assertions below are skipped on
-    # Julia < 1.11 rather than asserted against a stream that won't exhibit the same run.
+    # That narrative is a property of seed 4 under the Julia >= 1.11 random stream, so the
+    # assertions are skipped on older Julia, where this seed produces a different run.
     function _restart_run(reset_flag)
         rng        = MersenneTwister(4)
         restarts   = Ref(0)
@@ -283,8 +298,7 @@ end
                 popsize(pop) == 3 || return nothing
                 injected[]    = true
                 injections[] += 1
-                c = d1.data
-                d1.data = NonMarkovCell(c.id, c.birthtime, c.mutations, 1.2)
+                set_fitness!(d1, 1.2)
                 return nothing
             end,
             on_restart     = function (pop)

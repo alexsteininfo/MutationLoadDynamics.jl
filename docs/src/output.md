@@ -104,49 +104,42 @@ A [`TrajectoryPoint`](@ref) is recorded every `trajectory_dt` units of simulatio
 
 | Field | Meaning |
 |:---|:---|
-| `t` | the grid time this point is labelled with |
+| `t` | the grid time; the state is the exact state at that time |
 | `N_total` | population size |
 | `mean_fitness`, `var_fitness` | over living cells |
 | `mean_k`, `var_k` | total driver burden per living cell |
 
-!!! note "`t` is the grid time; the state is the first one at or after it"
-    Recording is driven by events, not by a clock. When an event lands past one or more
-    grid points, each is emitted with its own grid `t` but with the population state as
-    of that event. Points are therefore exactly `trajectory_dt` apart in `t`, while the
-    state attached to them lags by up to one inter-event interval — negligible once the
-    population is large, visible at the very start of a run from a single cell.
+!!! note "Each point is the exact state at its grid time"
+    Before each event is applied, every grid time strictly earlier than that event is
+    recorded with the current state, which is the state that held there. The state is
+    right-continuous: events at exactly a grid time count at that time. Nothing is
+    recorded once the population is empty, so an extinct run's trajectory simply stops.
 
-    Nothing is recorded once the population is empty, so an extinct run's trajectory
-    simply stops.
-
-!!! warning "Trajectory recording is the expensive part of a run"
-    Every point recomputes `mutations_per_cell`, which walks each living cell's whole
-    ancestral path — ``O(N \times \text{depth})`` per point. At ``N = 10^5`` and depth
-    ``\approx 20`` that is a few million pointer hops for one point. A `trajectory_dt`
-    fine enough to resolve the early growth phase will dominate the runtime of the late
-    one. If you need both, record the early phase with a fine `dt` in a first block and
-    the late phase with a coarse one in a chained second block.
+Each point costs ``O(N)`` (two field reads per living cell), so a fine `trajectory_dt`
+late in a large run is still the most expensive thing you can ask for. Record a fine
+early phase and a coarse late phase in two chained blocks if you need both.
 
 ### Snapshot triggers
 
 | Trigger | Fires |
 |:---|:---|
-| [`AtEnd`](@ref)`()` | once, when `simulate!` returns |
-| [`AtTime`](@ref)`(t)` | the first event at or after simulation time `t` |
-| [`AtPopSize`](@ref)`(N)` | the first event at which population size reaches `N` |
+| [`AtEnd`](@ref)`()` | at the end of every `simulate!` call |
+| [`AtTime`](@ref)`(t)` | once, with the exact state at simulation time `t`, labelled `t` |
+| [`AtPopSize`](@ref)`(N)` | once, at the first moment population size is at least `N` |
 
-Each trigger fires **at most once** per run. `AtTime` and `AtPopSize` are tested after
-every event; `AtEnd` fires when the block exits, whether it exited on the stop condition
-or on extinction.
+`AtTime` and `AtPopSize` fire at most once per accumulator; `AtEnd` fires whenever a
+block exits, on the stop condition or on extinction, so an accumulator carried across a
+chain gets one end snapshot per block.
 
-Two details worth knowing:
+Details worth knowing:
 
-- Triggers are checked *after* an event, never before the first one. `AtPopSize(N₀)` set
-  to the starting size therefore fires on the first event, when the size is already
-  ``N_0 \pm 1``.
-- If the block restarts on extinction, the accumulator is reset — trajectory, snapshots
-  and fired-trigger record all cleared — so what you get back describes the **successful
-  attempt only**, with times measured from the restart point.
+- `AtPopSize` is checked before the first event too, so `AtPopSize(N₀)` at the starting
+  size fires at once with the starting state.
+- An `AtTime` earlier than the start of the call it is first seen in never fires: that
+  state is gone. This only matters for a fresh accumulator on a chained call.
+- If the block restarts on extinction, only what this call recorded is discarded, so
+  this block's records describe the **successful attempt only** and earlier blocks'
+  records survive.
 
 `AtTime` is also the right tool when you want the state at a specific time without ending
 the run there, since a time-based `stopfunction` overshoots by one event (see

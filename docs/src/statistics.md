@@ -19,24 +19,27 @@ root = getsingleroot(allcells(pop))
 
 ```julia
 mutations_per_cell(pop)            # Vector{Int64}, one per living cell
-mutations_per_cell(root)           # same, in Leaves(root) order
+mutations_per_cell(root; includeclonal = true)   # same, in Leaves(root) order
 average_mutations(pop)             # mean burden
 mean_k(pop), var_k(pop)            # mean and variance of the burden
 clonal_mutations(pop)              # drivers carried by every living cell
 ```
 
-A cell's burden is the sum of `mutations` over its whole ancestral path, so each call
-walks from every leaf to the root: ``O(N \times \text{depth})``.
+A cell's burden is the sum of `mutations` over its whole ancestral path. It is stored
+on the cell as `total_mutations`, so these calls are ``O(N)``.
 
-`mutations_per_cell(root)` sums from the leaf up to **and including** `root`, but stops
-there. Pass `includeclonal = true` to keep climbing above `root` to the top of the tree,
-which only matters when `root` is a subtree root:
+For a root method, `includeclonal` says whether mutations carried by *every* leaf under
+`root` count:
 
 ```julia
 sub = findMRCA(some_cells)
-mutations_per_cell(sub)                        # burden acquired within the subtree
-mutations_per_cell(sub; includeclonal = true)  # plus everything inherited from above it
+mutations_per_cell(sub)                        # acquired strictly below sub (default)
+mutations_per_cell(sub; includeclonal = true)  # full burden, back to the top of the tree
 ```
+
+With the default `false`, `root`'s own mutations and those of its ancestors are left
+out: they are clonal in that subtree. For the founder of a simulated tree the two agree,
+because the founder carries no mutations.
 
 [`clonal_mutations`](@ref) is the burden at the MRCA of all living cells — the mutations
 no observable variation can distinguish, since every cell has them. It returns `0` when
@@ -46,14 +49,16 @@ there is no single MRCA.
 
 ```julia
 filtered_mutations_per_cell(root, 0.1)   # drop nodes subtending > 10% of leaves
-filtered_mutations_per_cell(root, 1.0)   # drop nothing — equals mutations_per_cell(root)
+filtered_mutations_per_cell(root, 1.0)   # drop nothing
 ```
 
 [`filtered_mutations_per_cell`](@ref) excludes mutations from any ancestral node whose
 living-descendant count exceeds `floor(threshold * N)`. This is the tree-side analogue of
 filtering out high-frequency variants before estimating a mutation rate: a node
 subtending a large fraction of the population contributes identically to every cell below
-it, so it carries no information about within-clone divergence. Two passes, returned in
+it, so it carries no information about within-clone divergence. It counts from each leaf
+up to and including `root`, and with `threshold = 1.0` on the top of a tree equals
+`mutations_per_cell(root; includeclonal = true)`. Returned in
 `Leaves(root)` order.
 
 ## Spectra
@@ -154,7 +159,7 @@ This is the one thing to get right, and it is not symmetric.
     is valid as a **pooled distribution** — a histogram of divisional depths — and not as
     a per-cell vector to be paired with a burden or a fitness.
 
-    The order is load-bearing rather than incidental: large volumes of stored results were
+    The order is kept fixed on purpose: large volumes of stored results were
     produced with it, so it will not be changed to match `Leaves`. If you need depth
     aligned with the other per-leaf quantities, compute it yourself over
     `getalivecells(root)`.
@@ -266,12 +271,15 @@ nodes in the tree.
 | Function | Cost |
 |:---|:---|
 | `fitness_per_cell`, `leaf_fitness` | ``O(N)`` |
-| `mutations_per_cell`, `mean_k`, `var_k` | ``O(N D)`` |
+| `mutations_per_cell`, `mean_k`, `var_k` | ``O(N)`` |
 | `sitefrequencyspectrum`, `branch_spectrum`, `leaf_depths` | ``O(T)`` |
-| `filtered_mutations_per_cell` | ``O(T + N D)`` |
+| `filtered_mutations_per_cell` | ``O(T)`` |
 | `celllifetimes` | ``O(T)`` |
-| `findMRCA(pop)` | ``O(N D)`` |
+| `findMRCA(pop)`, `getsingleroot(pop)` | ``O(T)`` |
 | `pairwisedistances`, `pairwise_differences`, `coalescence_times` | ``O(N^2 D)`` |
+
+On a single tree, `getsingleroot(pop)` is much faster than
+`getsingleroot(allcells(pop))`, which has to climb from every cell.
 
 The last row is the only one that will surprise you at scale, and it is why
 [Sampling](sampling.md) exists.

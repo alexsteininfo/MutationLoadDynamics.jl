@@ -1,21 +1,14 @@
 # Golden-value regression tests.
 #
 # These pin the exact RNG consumption of the default code path (no hooks, no carried
-# event queue). Their purpose is to guarantee that adding `on_division`/`on_restart` and
-# the chaining fix did not perturb the random stream by so much as one draw, because a
-# large body of already-serialized neutral simulation results must stay reproducible from
-# their seeds.
+# event queue), so that no refactor perturbs the random stream by a single draw: stored
+# simulation results must stay reproducible from their seeds.
 #
-# The literals were generated from the pre-change code on Julia 1.12.1 with the versions
-# in the committed Manifest. They are tied to the Gamma/Poisson/Exponential samplers in
-# `Distributions`, so a dependency upgrade may legitimately change them — regenerate
-# deliberately in that case. They are NOT expected to change for any edit to this package.
-#
-# Julia changed the algorithm behind `rand`/`randperm` range sampling in 1.11 (the CI
-# floor is 1.9), so a `MersenneTwister` seed does not reproduce the same draws across
-# that boundary — this is a documented Random stdlib guarantee gap, not a bug here. The
-# exact-value assertions below are only meaningful on the Julia line they were captured
-# on, so they are skipped below 1.11 rather than pinned to a stream that cannot match.
+# The literals were captured on Julia 1.12.1 with Distributions 0.25. They depend on the
+# Julia RNG and the Gamma/Poisson/Exponential samplers, so a Julia or Distributions
+# upgrade may legitimately change them (regenerate deliberately in that case); no edit
+# to this package should. The stream differs on Julia 1.10, so the exact values are
+# asserted on Julia >= 1.11 only.
 
 @testset "golden: neutral configuration (Gamma k=5, d=0.5, ν=2.0, Dirac drivers)" begin
     rng = MersenneTwister(20260901)

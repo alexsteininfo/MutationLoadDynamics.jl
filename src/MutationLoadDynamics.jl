@@ -6,6 +6,7 @@ using Random
 using StatsBase
 using AbstractTrees
 using DataStructures: BinaryMinHeap
+using StableRNGs: StableRNG
 
 export
 # Block
@@ -14,6 +15,7 @@ NonMarkovBlock,
 # Cell and tree types
 NonMarkovCell,
 BinaryNode,
+set_fitness!,
 
 # Population
 Population,

@@ -6,6 +6,9 @@ using AbstractTrees
 using Distributions
 using Statistics
 using DataStructures
+using StableRNGs
+
+include("fixtures.jl")
 
 tests = [
     "initialisation",
@@ -13,7 +16,9 @@ tests = [
     "simulations",
     "regression",
     "chaining",
+    "measurements",
     "statistics",
+    "validation",
     "sampling",
 ]
 

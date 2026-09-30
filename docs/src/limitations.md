@@ -55,20 +55,16 @@ block's rates are constant and the boundary is handled exactly.
 
 Whether the package should grow an explicit event-invalidation mechanism — pop the
 affected cells' events and redraw from the conditional law ``T \mid T > \text{age}`` —
-is genuinely undecided. It would make true density dependence exact, at the cost of a
-heap that supports deletion and of drawing from conditional distributions that most
-`Distributions.jl` types do not expose directly.
+is genuinely undecided. The conditional draw itself already exists — fresh schedules use
+it, by rejection sampling — so what is missing is a heap that supports deletion, and a
+rejection cost that grows for cells far into their cycle.
 
-### Chaining and `restart_on_extinction` do not combine
+### Restarts deep-copy the population
 
-The extinction snapshot is taken at the start of a `simulate!` call, so restarting a
-chained second block restores cells born under the first block and rewinds them to
-birthtimes predating the boundary. Rescheduling them then has the very age-conditioning
-defect that carrying the event queue exists to avoid. The snapshot is also a `deepcopy` of
-a live tree, so on a large chained population it duplicates the entire history.
-
-Use `restart_on_extinction` on the first block only, where the population is small and its
-birthtimes are the initial ones; drive anything more selective with your own retry loop.
+`restart_on_extinction` snapshots the population with `deepcopy` at the start of every
+call that sets it. `parent` links make that the whole history, so on a large chained
+population the snapshot is expensive. The restart itself is exact on any block, because
+restored cells are rescheduled conditioned on their age.
 
 ### Cell-cycle durations are independent between relatives
 

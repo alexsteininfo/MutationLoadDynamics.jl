@@ -8,24 +8,22 @@ The cell acquires no driver mutations at birth (it is the root of the lineage tr
 pop = initialize_population(fitness_init = 1.0)
 ```
 """
-function initialize_population(; fitness_init::Float64 = 1.0, time::Float64 = 0.0)
-    cell = NonMarkovCell(1, time, 0, fitness_init)
-    node = BinaryNode(cell)
-    cells = Dict{Int64, BinaryNode{NonMarkovCell}}(1 => node)
-    return Population(cells, time, 1)
+function initialize_population(; fitness_init::Real = 1.0, time::Real = 0.0)
+    return initialize_population(1; fitness_init = fitness_init, time = time)
 end
 
 """
     initialize_population(N::Int; fitness_init=1.0, time=0.0) -> Population
 
 Create a population of `N` identical independent cells, each with `fitness_init`.
-Useful for starting from a pre-existing pool rather than a single founder.
+Useful for starting from a pre-existing pool rather than a single founder. Each cell is
+the root of its own tree, so the population is a forest.
 """
-function initialize_population(N::Int; fitness_init::Float64 = 1.0, time::Float64 = 0.0)
+function initialize_population(N::Int; fitness_init::Real = 1.0, time::Real = 0.0)
+    N >= 1 || throw(ArgumentError("initialize_population: N must be >= 1, got $N"))
     cells = Dict{Int64, BinaryNode{NonMarkovCell}}()
     for id in 1:N
-        cell = NonMarkovCell(id, time, 0, fitness_init)
-        cells[id] = BinaryNode(cell)
+        cells[id] = BinaryNode(NonMarkovCell(id, time, 0, 0, fitness_init))
     end
-    return Population(cells, time, N)
+    return Population(cells, Float64(time), N)
 end
