@@ -15,7 +15,7 @@
 ## Run    : julia --project=. examples/04_ArbitraryInitialCondition.jl
 ##
 
-using MutationLoadDynamics
+using NonMarkovEvolution
 using Random
 using Distributions
 using Statistics: mean

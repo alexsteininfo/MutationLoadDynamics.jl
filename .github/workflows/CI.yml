@@ -37,7 +37,7 @@ jobs:
         if: matrix.version == '1'
         run: |
           julia -e 'using Pkg; Pkg.activate(temp = true); Pkg.develop(path = pwd()); Pkg.add("Aqua")
-                    using Aqua, MutationLoadDynamics; Aqua.test_all(MutationLoadDynamics)'
+                    using Aqua, NonMarkovEvolution; Aqua.test_all(NonMarkovEvolution)'
       - name: Run the examples
         run: |
           for f in examples/*.jl; do

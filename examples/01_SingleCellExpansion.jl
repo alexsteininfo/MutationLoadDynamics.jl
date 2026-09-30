@@ -10,7 +10,7 @@
 ## Run    : julia --project=. examples/01_SingleCellExpansion.jl
 ##
 
-using MutationLoadDynamics
+using NonMarkovEvolution
 using Random
 using Distributions
 using Statistics: mean, std

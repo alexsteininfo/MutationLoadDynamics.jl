@@ -57,8 +57,8 @@ Supertype of the statistics a snapshot can record. To add one, define a subtype 
 
 ```julia
 struct MeanFitness <: AbstractStatistic end
-MutationLoadDynamics.measure(::MeanFitness, pop) = mean(fitness_per_cell(pop))
-MutationLoadDynamics.statistic_name(::MeanFitness) = :mean_fitness
+NonMarkovEvolution.measure(::MeanFitness, pop) = mean(fitness_per_cell(pop))
+NonMarkovEvolution.statistic_name(::MeanFitness) = :mean_fitness
 ```
 """
 abstract type AbstractStatistic end

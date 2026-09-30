@@ -106,7 +106,7 @@ end
 @testset "tree statistics agree with independent walks on a simulated tree" begin
     pop  = simple_pop(ν = 2.0, Nmax = 150)
     root = single_root(pop)
-    @test MutationLoadDynamics._leaves(root) == collect(Leaves(root))
+    @test NonMarkovEvolution._leaves(root) == collect(Leaves(root))
     @test alive_cells(root) == collect(Leaves(root))
     burden = id_burden_map(root)
     @test drivers_per_cell(root; includeclonal = true) ==
@@ -277,12 +277,12 @@ end
     @test isnothing(find_mrca(a1, b))
     @test isnothing(find_mrca(b, a1))
     @test pairwise_distance(a1, b) == 3 + 4
-    @test MutationLoadDynamics._coalescence_time(a1, b, 5.0) == 5.0   # back to t = 0
+    @test NonMarkovEvolution._coalescence_time(a1, b, 5.0) == 5.0   # back to t = 0
     pop = initialize_population(4)
     @test isnothing(find_mrca(pop))
     @test clonal_drivers(pop) == 0
     @test length(coalescence_times(pop)) == 6
-    @test length(MutationLoadDynamics._roots(alive_cells(pop))) == 4
+    @test length(NonMarkovEvolution._roots(alive_cells(pop))) == 4
 end
 
 @testset "pairwise helpers handle fewer than two cells" begin

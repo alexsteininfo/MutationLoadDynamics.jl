@@ -101,10 +101,10 @@ end
 # User-defined statistics must be declared at top level (a struct cannot be defined
 # inside a testset).
 struct MeanFitnessStat <: AbstractStatistic end
-MutationLoadDynamics.measure(::MeanFitnessStat, pop) = mean(fitness_per_cell(pop))
-MutationLoadDynamics.statistic_name(::MeanFitnessStat) = :mean_fitness
+NonMarkovEvolution.measure(::MeanFitnessStat, pop) = mean(fitness_per_cell(pop))
+NonMarkovEvolution.statistic_name(::MeanFitnessStat) = :mean_fitness
 struct UnnamedStat <: AbstractStatistic end
-MutationLoadDynamics.measure(::UnnamedStat, pop) = popsize(pop)
+NonMarkovEvolution.measure(::UnnamedStat, pop) = popsize(pop)
 struct NoMeasureStat <: AbstractStatistic end
 
 @testset "user-defined snapshot statistics" begin

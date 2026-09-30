@@ -47,8 +47,8 @@ end
     @test sample_leaves(root, 2; seed = UInt64(1)).sampled_ids  == Int64[3, 5]
     @test sample_leaves(root, 2; seed = UInt64(42)).sampled_ids == Int64[5, 4]
     @test sample_leaves(root, 3; seed = UInt64(7)).sampled_ids  == Int64[5, 4, 3]
-    @test MutationLoadDynamics._draw_seed(UInt64(0xBEEF), 1000, 1) == 0x951c6c7fdc8c2e70
-    @test MutationLoadDynamics._draw_seed(UInt64(1), 2, 3)         == 0xd0734750fde362b3
+    @test NonMarkovEvolution._draw_seed(UInt64(0xBEEF), 1000, 1) == 0x951c6c7fdc8c2e70
+    @test NonMarkovEvolution._draw_seed(UInt64(1), 2, 3)         == 0xd0734750fde362b3
 end
 
 @testset "n = N_full reproduces the source tree exactly" begin

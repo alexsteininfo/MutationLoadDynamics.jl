@@ -57,7 +57,7 @@ Passengers at a neutral rate ``m`` per daughter per division are derived from th
 rather than simulated — exact in distribution, free, and one tree serves every ``m``:
 
 ```@example neutral
-using MutationLoadDynamics, Distributions, Random
+using NonMarkovEvolution, Distributions, Random
 block = NonMarkovBlock(
     birth_dist = f -> Gamma(5.0, 1 / (5 * f)), death_dist = f -> Exponential(4.0),
     driver_dist = Dirac(0.0), fitness_update = (f, δ) -> f, ν = 0.0,

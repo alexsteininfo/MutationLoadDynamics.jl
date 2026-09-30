@@ -1,4 +1,4 @@
-name = "MutationLoadDynamics"
+name = "NonMarkovEvolution"
 uuid = "7b855ee6-6887-412f-a571-26d20a5a92d7"
 version = "0.4.0-DEV"
 authors = ["Alexander Stein"]

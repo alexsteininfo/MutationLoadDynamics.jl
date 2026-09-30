@@ -126,7 +126,7 @@ types (Golubev 2016). `birth_dist` may return any univariate distribution, and t
 simulator only ever calls `rand(rng, d)` on it, so a sampler is a few lines:
 
 ```@example emg
-using MutationLoadDynamics, Distributions, Random, Statistics
+using NonMarkovEvolution, Distributions, Random, Statistics
 
 struct ExpModGamma <: ContinuousUnivariateDistribution
     k::Float64; θ::Float64; λ::Float64       # Gamma shape and scale, exponential mean

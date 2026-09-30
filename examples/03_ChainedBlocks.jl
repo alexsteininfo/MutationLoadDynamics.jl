@@ -13,7 +13,7 @@
 ## Run    : julia --project=. examples/03_ChainedBlocks.jl
 ##
 
-using MutationLoadDynamics
+using NonMarkovEvolution
 using Random
 using Distributions
 using Statistics: mean, std

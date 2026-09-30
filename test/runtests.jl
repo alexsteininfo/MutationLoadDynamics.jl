@@ -1,4 +1,4 @@
-using MutationLoadDynamics
+using NonMarkovEvolution
 using Test
 using Random
 using AbstractTrees
@@ -21,7 +21,7 @@ tests = [
     "sampling",
 ]
 
-@testset "MutationLoadDynamics.jl" begin
+@testset "NonMarkovEvolution.jl" begin
     for test in tests
         @testset "$test" begin
             include(test * ".jl")

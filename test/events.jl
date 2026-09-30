@@ -1,8 +1,8 @@
 @testset "CellEvent ordering" begin
     pop  = initialize_population(fitness_init = 1.0)
     node = first(values(pop.cells))
-    e1 = MutationLoadDynamics.CellEvent(0.5, node, true)
-    e2 = MutationLoadDynamics.CellEvent(1.5, node, false)
+    e1 = NonMarkovEvolution.CellEvent(0.5, node, true)
+    e2 = NonMarkovEvolution.CellEvent(1.5, node, false)
     @test e1 < e2
     @test !(e2 < e1)
 end
@@ -19,9 +19,9 @@ end
         fitness_update = (f, δ) -> f + δ,
         ν              = 0.0,
     )
-    heap = DataStructures.BinaryMinHeap{MutationLoadDynamics.CellEvent}()
+    heap = DataStructures.BinaryMinHeap{NonMarkovEvolution.CellEvent}()
     for _ in 1:100
-        MutationLoadDynamics.schedule_cell!(heap, node, block, rng)
+        NonMarkovEvolution.schedule_cell!(heap, node, block, rng)
     end
     while !isempty(heap)
         e = pop!(heap)
@@ -44,8 +44,8 @@ end
     n_birth = 0
     n_death = 0
     for _ in 1:500
-        heap = DataStructures.BinaryMinHeap{MutationLoadDynamics.CellEvent}()
-        MutationLoadDynamics.schedule_cell!(heap, node, block, rng)
+        heap = DataStructures.BinaryMinHeap{NonMarkovEvolution.CellEvent}()
+        NonMarkovEvolution.schedule_cell!(heap, node, block, rng)
         e = pop!(heap)
         e.is_division ? (n_birth += 1) : (n_death += 1)
     end

@@ -1,7 +1,9 @@
-# MutationLoadDynamics.jl
+# NonMarkovEvolution.jl
 
-Forward simulation of a somatic cell population under **non-Markovian** birth–death
-dynamics, with per-cell fitness and the complete lineage tree of the survivors.
+Stochastic, **non-Markovian** birth–death evolution of cell populations with
+fitness-changing mutations: realistic cell-cycle timing, per-cell fitness, and the
+complete lineage tree of the survivors. Built for somatic evolution (copy-number or SNV
+drivers), but not restricted to it.
 
 Division and death waiting times are drawn from arbitrary distributions that may depend
 on the cell's own fitness, so the cell cycle can have a realistic refractory period that
@@ -19,13 +21,13 @@ Requires Julia 1.10 or newer.
 
 ```julia
 using Pkg
-Pkg.add(url = "https://github.com/alexsteininfo/MutationLoadDynamics.jl")
+Pkg.add(url = "https://github.com/alexsteininfo/NonMarkovEvolution.jl")
 ```
 
 ## Quickstart
 
 ```@example quickstart
-using MutationLoadDynamics, Distributions, Random, Statistics
+using NonMarkovEvolution, Distributions, Random, Statistics
 
 pop = initialize_population(fitness_init = 1.0)      # one founding cell
 

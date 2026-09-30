@@ -9,7 +9,7 @@ Everything here is computed after a run. Two families of methods exist:
   [`sample_leaves`](@ref) draw.
 
 ```@example stats
-using MutationLoadDynamics, Distributions, Random, Statistics
+using NonMarkovEvolution, Distributions, Random, Statistics
 block = NonMarkovBlock(
     birth_dist = f -> Gamma(5.0, 1 / (5 * f)), death_dist = f -> Exponential(4.0),
     driver_dist = Exponential(0.05), fitness_update = (f, δ) -> f + δ, ν = 0.5,

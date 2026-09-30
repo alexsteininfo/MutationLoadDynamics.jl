@@ -50,7 +50,7 @@ A [`MeasurementSpec`](@ref) declares what to collect, a [`MeasurementAccumulator
 collects it during `simulate!`, and [`finalize_measurements`](@ref) packages it:
 
 ```@example rec
-using MutationLoadDynamics, Distributions, Random
+using NonMarkovEvolution, Distributions, Random
 spec = MeasurementSpec(
     trajectory_dt     = 0.5,
     snapshot_triggers = [AtTime(3.0), AtPopSize(500), AtEnd()],
@@ -127,7 +127,7 @@ name unless you also define [`statistic_name`](@ref):
 ```@example rec
 using Statistics
 struct MeanBurden <: AbstractStatistic end
-MutationLoadDynamics.measure(::MeanBurden, pop) = mean(drivers_per_cell(pop))
+NonMarkovEvolution.measure(::MeanBurden, pop) = mean(drivers_per_cell(pop))
 
 acc2 = MeasurementAccumulator(MeasurementSpec(snapshot_triggers = [AtTime(2.0), AtEnd()],
                                               snapshot_stats = [MeanBurden()]))

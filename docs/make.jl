@@ -1,12 +1,12 @@
 using Documenter
-using MutationLoadDynamics
+using NonMarkovEvolution
 
-DocMeta.setdocmeta!(MutationLoadDynamics, :DocTestSetup,
-                    :(using MutationLoadDynamics); recursive = true)
+DocMeta.setdocmeta!(NonMarkovEvolution, :DocTestSetup,
+                    :(using NonMarkovEvolution); recursive = true)
 
 makedocs(
-    sitename = "MutationLoadDynamics.jl",
-    modules = [MutationLoadDynamics],
+    sitename = "NonMarkovEvolution.jl",
+    modules = [NonMarkovEvolution],
     authors = "Alexander Stein",
     pages = [
         "Home" => "index.md",
@@ -25,6 +25,6 @@ makedocs(
 )
 
 deploydocs(
-    repo = "github.com/alexsteininfo/MutationLoadDynamics.jl.git",
+    repo = "github.com/alexsteininfo/NonMarkovEvolution.jl.git",
     devbranch = "main",
 )

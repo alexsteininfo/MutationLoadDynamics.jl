@@ -1,8 +1,8 @@
 """
     NonMarkovEvolution
 
-Forward simulation of a somatic cell population under non-Markovian birth–death
-dynamics, with per-cell fitness and the complete lineage tree of the survivors.
+Stochastic, non-Markovian birth–death evolution of cell populations with fitness-changing
+mutations: per-cell fitness and the complete lineage tree of the survivors.
 """
 module NonMarkovEvolution
 

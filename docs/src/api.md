@@ -7,7 +7,7 @@ Pages = ["api.md"]
 ## Public
 
 ```@autodocs
-Modules = [MutationLoadDynamics]
+Modules = [NonMarkovEvolution]
 Private = false
 Order   = [:module, :type, :function]
 ```
@@ -17,7 +17,7 @@ Order   = [:module, :type, :function]
 Documented for readers of the source; not part of the public API.
 
 ```@autodocs
-Modules = [MutationLoadDynamics]
+Modules = [NonMarkovEvolution]
 Public  = false
 Order   = [:type, :function]
 ```

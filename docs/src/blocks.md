@@ -54,7 +54,7 @@ the shape control only the variability, so that ``b`` is a rate comparable acros
 Every row has mean ``1/(bf)``, which this block checks (and `test/events.jl` asserts):
 
 ```@example waiting
-using MutationLoadDynamics, Distributions, Statistics
+using NonMarkovEvolution, Distributions, Statistics
 b, f, k, α, σ = 1.3, 1.7, 5.0, 2.5, 0.4
 modes = [Dirac(1 / (b * f)), Exponential(1 / (b * f)), Gamma(k, 1 / (k * b * f)),
          Weibull(α, 1 / (b * f * mean(Weibull(α, 1.0)))), LogNormal(-log(b * f) - σ^2 / 2, σ)]
@@ -219,7 +219,7 @@ descendants. Inside the hook the parent has already been replaced by the daughte
 population that had `M` cells reads as `M + 1`.
 
 ```@example hooks
-using MutationLoadDynamics, Distributions, Random
+using NonMarkovEvolution, Distributions, Random
 N_critic, s = 20, 1.0
 injected    = Ref(false)
 block = NonMarkovBlock(

@@ -9,7 +9,7 @@
 ## Run    : julia --project=. examples/02_GrowthWithDrivers.jl
 ##
 
-using MutationLoadDynamics
+using NonMarkovEvolution
 using Distributions
 using Random
 using Statistics: mean, std

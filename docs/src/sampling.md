@@ -6,7 +6,7 @@ first-class operation. It is **post-hoc**: it applies to a finished tree, and is
 deliberately not part of [`NonMarkovBlock`](@ref) or [`MeasurementSpec`](@ref).
 
 ```@example sampling
-using MutationLoadDynamics, Distributions, Random, Statistics
+using NonMarkovEvolution, Distributions, Random, Statistics
 block = NonMarkovBlock(
     birth_dist = f -> Gamma(5.0, 1 / (5 * f)), death_dist = f -> Exponential(4.0),
     driver_dist = Exponential(0.05), fitness_update = (f, δ) -> f + δ, ν = 0.5,
@@ -45,7 +45,7 @@ node, so a sampled cell's root-to-leaf path is unchanged:
 return exactly that cell's **full-tree** burden and depth. Collapsing would turn depth
 into a count of bifurcations that happened to survive sampling — a property of the
 sample, not of the cell. It is also the shape [`prune_tree!`](@ref
-MutationLoadDynamics.prune_tree!) leaves when a lineage dies out, so every statistic
+NonMarkovEvolution.prune_tree!) leaves when a lineage dies out, so every statistic
 applies to a sampled tree unchanged.
 
 ```@example sampling
@@ -115,7 +115,7 @@ samples = [sample_leaves(r, min(100, popsize(r)); seed = i) for (i, r) in enumer
 ## A typical sweep
 
 ```julia
-using MutationLoadDynamics, Distributions, Random, Serialization
+using NonMarkovEvolution, Distributions, Random, Serialization
 
 block(s) = NonMarkovBlock(
     birth_dist = f -> Gamma(5.0, 1 / (5 * f)), death_dist = f -> Exponential(1 / 0.3),
