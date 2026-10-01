@@ -105,7 +105,7 @@ lineage tree — see [Chaining blocks](blocks.md#Chaining-blocks).
 
 - [`BirthDeathMutation`](https://github.com/alexsteininfo/BirthDeathMutation) — the low
   driver-rate regime, where clones are the natural unit.
-- [`CopyNumberEvolution.jl`](https://github.com/alexsteininfo/CopyNumberEvolution.jl) —
+- [`CopyNumberPainter.jl`](https://github.com/alexsteininfo/CopyNumberPainter.jl) —
   copy-number alterations along a tree from this package.
 - [`gITH-nonMarkovian`](https://github.com/alexsteininfo/gITH-nonMarkovian) — the
   analyses, figures and theory built on this simulator.

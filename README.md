@@ -74,7 +74,7 @@ drivers, chained two-phase runs, and an arbitrary initial condition.
   computed — on the whole population or on a reproducible uniform sample.
 
 Neutral passengers, spatial structure and clone-level bookkeeping are out of scope.
-Related: [`CopyNumberEvolution.jl`](https://github.com/alexsteininfo/CopyNumberEvolution.jl)
+Related: [`CopyNumberPainter.jl`](https://github.com/alexsteininfo/CopyNumberPainter.jl)
 (copy number along these trees),
 [`BirthDeathMutation`](https://github.com/alexsteininfo/BirthDeathMutation) (the low-`ν`
 regime) and [`gITH-nonMarkovian`](https://github.com/alexsteininfo/gITH-nonMarkovian)

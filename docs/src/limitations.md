@@ -16,7 +16,7 @@
   history; for ``ν \ll 1`` see
   [`BirthDeathMutation`](https://github.com/alexsteininfo/BirthDeathMutation).
 - **Copy number, sequencing noise, variant calling** live downstream, for example in
-  [`CopyNumberEvolution.jl`](https://github.com/alexsteininfo/CopyNumberEvolution.jl).
+  [`CopyNumberPainter.jl`](https://github.com/alexsteininfo/CopyNumberPainter.jl).
 - **Inference of any kind** — keeping it apart lets estimators run on real data without
   a simulator in their dependency chain.
 
